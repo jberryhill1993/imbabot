@@ -1,16 +1,17 @@
-"""Tkinter dashboard — this is what gets packaged into the .exe.
+"""Modern dashboard — packaged into the .exe/.app.
 
-Layout mirrors the setup guide: a risk disclaimer on launch, connection +
-strategy settings, a live dashboard (price / overnight range / countdown), Arm
-and Emergency-Stop controls, and a log panel you can save.
+A professional dark UI built on ttk's ``clam`` theme with a hand-tuned palette
+(works on Tk 8.5 and 8.6, and overrides macOS aqua so colors render everywhere):
+a header with live status pills, a hero dashboard (countdown / price / range),
+Arm + Emergency-Stop controls, tabbed settings, and a themed activity log.
 
-Threading model: only the main thread touches widgets. Background work (connect,
-data polling, the fire timer, the OCO monitor) runs on worker threads that push
-events onto a queue; the main thread drains it via ``root.after``.
+Threading model (unchanged): only the main thread touches widgets. Background work
+runs on worker threads that push events onto a queue drained via ``root.after``.
 """
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -21,14 +22,34 @@ try:
     from tkinter import messagebox, filedialog, ttk
 except Exception as exc:  # pragma: no cover
     raise SystemExit(
-        "Tkinter is required for the GUI. On macOS use python.org Python or "
-        "`brew install python-tk`. Error: %s" % exc
+        "Tkinter is required. On macOS use python.org Python or `brew install python-tk`. "
+        "Error: %s" % exc
     )
 
 from . import __version__
 from .config import Settings, load_api_key, store_api_key, log_path
 from .logbus import Logger
 from .models import Account
+
+# ---- palette (GitHub-dark inspired) ----
+BG = "#0d1117"
+SURFACE = "#161b22"
+CARD = "#1b2330"
+ELEV = "#222b3a"
+BORDER = "#30363d"
+FG = "#e6edf3"
+MUTED = "#8b949e"
+ACCENT = "#388bfd"
+ACCENT_H = "#4c9bff"
+GREEN = "#2ea043"
+GREEN_H = "#3fb950"
+RED = "#da3633"
+RED_H = "#f85149"
+AMBER = "#bb8009"
+AMBER_H = "#d29922"
+
+FONT = "Segoe UI" if sys.platform.startswith("win") else ("Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans")
+MONO = "Consolas" if sys.platform.startswith("win") else ("Menlo" if sys.platform == "darwin" else "DejaVu Sans Mono")
 
 DISCLAIMER = (
     "Imbabot places real futures orders through your TopstepX / ProjectX account.\n\n"
@@ -39,19 +60,12 @@ DISCLAIMER = (
     "your firm's current rules before trading live.\n"
     "• The bot starts in DRY-RUN mode (no orders sent). You must deliberately disable it "
     "to trade.\n\n"
-    "Click Accept to continue, or Exit to close."
+    "Click OK to accept, or Cancel to exit."
 )
-
-RED = "#c0392b"
-GREEN = "#1e8449"
-AMBER = "#b9770e"
-BG = "#1b1f24"
-FG = "#e6e6e6"
-PANEL = "#252b32"
 
 
 class ImbabotGUI:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Misc, shot_path: Optional[str] = None) -> None:
         self.root = root
         self.settings = Settings.load()
         self.events: "queue.Queue[tuple]" = queue.Queue()
@@ -61,12 +75,16 @@ class ImbabotGUI:
         self.accounts: List[Account] = []
         self._poll_stop = threading.Event()
 
-        root.title(f"Imbabot {__version__} — TopstepX opening-range bot")
+        root.title(f"Imbabot {__version__}")
         root.configure(bg=BG)
-        root.geometry("860x720")
-        root.minsize(760, 640)
+        root.minsize(920, 740)
+        root.update_idletasks()
+        w, h = 1000, 800
+        x = max(0, (root.winfo_screenwidth() - w) // 2)
+        y = max(0, (root.winfo_screenheight() - h) // 3)
+        root.geometry(f"{w}x{h}+{x}+{y}")
 
-        if not self._show_disclaimer():
+        if shot_path is None and not self._show_disclaimer():
             root.destroy()
             return
 
@@ -77,181 +95,323 @@ class ImbabotGUI:
         self.root.after(1000, self._tick_countdown)
         self.log(f"Imbabot {__version__} ready. Config: {log_path().parent}")
 
+        if shot_path:  # self-portrait mode (skips disclaimer, captures, quits)
+            self._demo_fill()
+            self.root.after(1600, lambda: self._take_shot(shot_path))
+
+    def _demo_fill(self) -> None:
+        self.lbl_price.configure(text="30181.25")
+        self.lbl_range.configure(text="29478–30201")
+        self.lbl_count.configure(text="17:42:09")
+        self.lbl_fire.configure(text="09:29:57")
+        for line, lvl in [("Imbabot ready. Backend: API (TopstepX).", "info"),
+                          ("Connected · $150K PRACTICE | PRAC-V2", "info"),
+                          ("ARMED. Fire at 09:29:57. Mode=semi_auto dry_run=True", "warn")]:
+            self.log(line, lvl)
+
+    def _take_shot(self, path: str) -> None:
+        import subprocess
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+            x, y = self.root.winfo_rootx(), self.root.winfo_rooty()
+            w, h = self.root.winfo_width(), self.root.winfo_height()
+            subprocess.run(["screencapture", "-x", f"-R{x},{y},{w},{h}", path], timeout=10)
+        except Exception:
+            pass
+        self.root.destroy()
+
     # ---------------------------------------------------------- disclaimer
     def _show_disclaimer(self) -> bool:
-        return messagebox.askokcancel(
-            "Risk disclaimer", DISCLAIMER, icon="warning",
-            default="cancel",
-        )
+        return messagebox.askokcancel("Risk disclaimer", DISCLAIMER, icon="warning", default="cancel")
 
     # ------------------------------------------------------------- styling
     def _build_styles(self) -> None:
-        style = ttk.Style()
+        st = ttk.Style()
         try:
-            style.theme_use("clam")
+            st.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("TFrame", background=BG)
-        style.configure("Panel.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=FG)
-        style.configure("Panel.TLabel", background=PANEL, foreground=FG)
-        style.configure("Head.TLabel", background=BG, foreground=FG, font=("Helvetica", 11, "bold"))
-        style.configure("Big.TLabel", background=PANEL, foreground=FG, font=("Helvetica", 22, "bold"))
-        style.configure("TButton", padding=6)
-        style.configure("TCheckbutton", background=PANEL, foreground=FG)
-        style.configure("TRadiobutton", background=PANEL, foreground=FG)
-        style.configure("TEntry", fieldbackground="#0f1316", foreground=FG)
+        self.root.option_add("*TCombobox*Listbox.background", SURFACE)
+        self.root.option_add("*TCombobox*Listbox.foreground", FG)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
 
-    def _panel(self, parent, title: str) -> ttk.Frame:
-        wrap = ttk.Frame(parent, style="TFrame")
-        ttk.Label(wrap, text=title, style="Head.TLabel").pack(anchor="w", pady=(8, 2))
-        inner = ttk.Frame(wrap, style="Panel.TFrame", padding=10)
-        inner.pack(fill="x")
-        wrap.pack(fill="x", padx=12)
-        return inner
+        st.configure(".", background=BG, foreground=FG, fieldbackground=SURFACE,
+                     bordercolor=BORDER, focuscolor=ACCENT, font=(FONT, 11))
+        for name, bg in (("TFrame", BG), ("Surface.TFrame", SURFACE), ("Card.TFrame", CARD),
+                         ("Header.TFrame", BG)):
+            st.configure(name, background=bg)
+        st.configure("TLabel", background=BG, foreground=FG, font=(FONT, 11))
+        st.configure("Muted.TLabel", background=BG, foreground=MUTED, font=(FONT, 10))
+        st.configure("Brand.TLabel", background=BG, foreground=ACCENT, font=(FONT, 21, "bold"))
+        st.configure("Sub.TLabel", background=BG, foreground=MUTED, font=(FONT, 10))
+        st.configure("H.TLabel", background=BG, foreground=FG, font=(FONT, 11, "bold"))
+        st.configure("CardTitle.TLabel", background=CARD, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(FONT, 18, "bold"))
+        st.configure("CardBig.TLabel", background=CARD, foreground=ACCENT, font=(FONT, 34, "bold"))
+        st.configure("Banner.TLabel", background=BG, foreground=MUTED, font=(FONT, 11, "bold"))
+        # pills
+        for nm, bg, fg in (("Pill.Sec.TLabel", ELEV, MUTED), ("Pill.Ok.TLabel", GREEN, "#ffffff"),
+                           ("Pill.Bad.TLabel", RED, "#ffffff"), ("Pill.Warn.TLabel", AMBER, "#0d1117")):
+            st.configure(nm, background=bg, foreground=fg, font=(FONT, 9, "bold"), padding=(11, 5))
+        # inputs
+        st.configure("TEntry", fieldbackground="#0b0e14", foreground=FG, insertcolor=FG,
+                     bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=6)
+        st.map("TEntry", bordercolor=[("focus", ACCENT)])
+        st.configure("TCombobox", fieldbackground="#0b0e14", background=SURFACE, foreground=FG,
+                     arrowcolor=MUTED, bordercolor=BORDER, padding=5)
+        st.map("TCombobox", fieldbackground=[("readonly", "#0b0e14")], foreground=[("readonly", FG)])
+        st.configure("TCheckbutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
+        st.map("TCheckbutton", background=[("active", BG)], indicatorcolor=[("selected", ACCENT)])
+        st.configure("TRadiobutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
+        st.map("TRadiobutton", background=[("active", BG)], indicatorcolor=[("selected", ACCENT)])
+        st.configure("Card.TCheckbutton", background=BG)
+        st.configure("TSeparator", background=BORDER)
+        st.configure("Vertical.TScrollbar", background=ELEV, troughcolor=BG, bordercolor=BG,
+                     arrowcolor=MUTED)
+        # notebook
+        st.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(2, 6, 2, 0))
+        st.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(18, 9),
+                     font=(FONT, 10, "bold"), borderwidth=0)
+        st.map("TNotebook.Tab", background=[("selected", SURFACE)], foreground=[("selected", FG)],
+               expand=[("selected", (0, 0, 0, 0))])
+        # buttons
+        self._btn_style(st, "Accent.TButton", ACCENT, ACCENT_H)
+        self._btn_style(st, "Success.TButton", GREEN, GREEN_H)
+        self._btn_style(st, "Danger.TButton", RED, RED_H)
+        self._btn_style(st, "Warning.TButton", AMBER, AMBER_H, fg="#0d1117")
+        self._btn_style(st, "Ghost.TButton", ELEV, BORDER, fg=FG, small=True)
+        self.st = st
+
+    def _btn_style(self, st, name, bg, hover, fg="#ffffff", small=False):
+        st.configure(name, background=bg, foreground=fg, font=(FONT, 10 if small else 11, "bold"),
+                     borderwidth=0, relief="flat", focuscolor=bg,
+                     padding=(12, 7) if small else (20, 11))
+        st.map(name, background=[("active", hover), ("pressed", hover), ("disabled", ELEV)],
+               foreground=[("disabled", MUTED)])
+
+    # ----------------------------------------------------------- helpers
+    def _pill(self, parent, text, kind="Sec"):
+        lbl = ttk.Label(parent, text=text, style=f"Pill.{kind}.TLabel")
+        return lbl
+
+    def _set_pill(self, lbl, text, kind):
+        lbl.configure(text=text, style=f"Pill.{kind}.TLabel")
+
+    def _field(self, parent, label, var, r, c=0, width=18, show=None):
+        ttk.Label(parent, text=label, style="Muted.TLabel").grid(row=r, column=c, sticky="w", padx=(0, 8), pady=5)
+        ent = ttk.Entry(parent, textvariable=var, width=width, font=(FONT, 11))
+        if show:
+            ent.configure(show=show)
+        ent.grid(row=r, column=c + 1, sticky="w", pady=5)
+        return ent
+
+    def _stat(self, parent, title, col, big=False):
+        card = ttk.Frame(parent, style="Card.TFrame", padding=(16, 13))
+        card.grid(row=0, column=col, padx=6, sticky="nsew")
+        parent.columnconfigure(col, weight=1)
+        ttk.Label(card, text=title.upper(), style="CardTitle.TLabel").pack(anchor="w")
+        val = ttk.Label(card, text="—", style="CardBig.TLabel" if big else "CardVal.TLabel")
+        val.pack(anchor="w", pady=(6, 0))
+        return val
 
     # ------------------------------------------------------------- widgets
     def _build_widgets(self) -> None:
-        # ---- backend ----
-        b = self._panel(self.root, "0 · Backend")
-        self.var_backend = tk.StringVar(value=self.settings.backend)
-        ttk.Radiobutton(b, text="API (TopstepX — recommended)", variable=self.var_backend,
-                        value="api", command=self._on_backend_change).grid(row=0, column=0, sticky="w")
-        ttk.Radiobutton(b, text="Browser automation (fallback)", variable=self.var_backend,
-                        value="browser", command=self._on_backend_change).grid(row=0, column=1, sticky="w", padx=(16, 0))
-        ttk.Label(b, text="Platform", style="Panel.TLabel").grid(row=0, column=2, sticky="w", padx=(16, 4))
-        self.var_platform = tk.StringVar(value=self.settings.browser_platform)
-        self.cmb_platform = ttk.Combobox(b, state="readonly", width=12,
-                                         values=["projectx", "tradesea"], textvariable=self.var_platform)
-        self.cmb_platform.grid(row=0, column=3, sticky="w")
-        self.var_use_chrome = tk.BooleanVar(value=self.settings.chrome_channel == "chrome")
-        ttk.Checkbutton(b, text="Use my installed Google Chrome", variable=self.var_use_chrome).grid(
-            row=0, column=4, sticky="w", padx=(16, 0))
-        self.lbl_backend_hint = ttk.Label(b, text="", style="Panel.TLabel", foreground=AMBER)
-        self.lbl_backend_hint.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        root = self.root
 
-        # ---- connection ----
-        c = self._panel(self.root, "1 · Connection")
-        self.var_base = tk.StringVar(value=self.settings.base_url)
-        self.var_user = tk.StringVar(value=self.settings.username)
-        self.var_key = tk.StringVar(value="")
-        self.var_remember = tk.BooleanVar(value=True)
-        self._row(c, "Base URL", self.var_base, 0, width=34)
-        self._row(c, "Username", self.var_user, 1, width=24)
-        ttk.Label(c, text="API key", style="Panel.TLabel").grid(row=2, column=0, sticky="w", pady=3)
-        ttk.Entry(c, textvariable=self.var_key, show="•", width=36).grid(row=2, column=1, sticky="w")
-        ttk.Checkbutton(c, text="remember on this device", variable=self.var_remember).grid(
-            row=2, column=2, padx=8, sticky="w")
-        self.btn_connect = ttk.Button(c, text="Connect", command=self._on_connect)
-        self.btn_connect.grid(row=0, column=2, rowspan=2, padx=8)
-        self.lbl_conn = ttk.Label(c, text="not connected", style="Panel.TLabel", foreground=AMBER)
-        self.lbl_conn.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        # ===== header =====
+        header = ttk.Frame(root, style="Header.TFrame", padding=(20, 16))
+        header.pack(fill="x")
+        left = ttk.Frame(header, style="Header.TFrame")
+        left.pack(side="left")
+        ttk.Label(left, text="◆ IMBABOT", style="Brand.TLabel").pack(side="left")
+        ttk.Label(left, text=f"   v{__version__}  ·  TopstepX opening-range bot",
+                  style="Sub.TLabel").pack(side="left", pady=(8, 0))
+        badges = ttk.Frame(header, style="Header.TFrame")
+        badges.pack(side="right")
+        self.badge_conn = self._pill(badges, "Offline", "Sec")
+        self.badge_conn.pack(side="left", padx=4)
+        self.badge_mode = self._pill(badges, "● DRY-RUN", "Ok")
+        self.badge_mode.pack(side="left", padx=4)
+        self.badge_armed = self._pill(badges, "DISARMED", "Sec")
+        self.badge_armed.pack(side="left", padx=4)
+        ttk.Separator(root).pack(fill="x", padx=20)
 
-        # ---- account / contract ----
-        a = self._panel(self.root, "2 · Account & Contract")
-        ttk.Label(a, text="Account", style="Panel.TLabel").grid(row=0, column=0, sticky="w")
-        self.cmb_account = ttk.Combobox(a, state="readonly", width=30, values=[])
-        self.cmb_account.grid(row=0, column=1, sticky="w", padx=6)
-        self.cmb_account.bind("<<ComboboxSelected>>", self._on_account_pick)
-        ttk.Label(a, text="Symbol", style="Panel.TLabel").grid(row=0, column=2, sticky="w", padx=(16, 0))
-        self.var_symbol = tk.StringVar(value=self.settings.contract_symbol)
-        ttk.Entry(a, textvariable=self.var_symbol, width=10).grid(row=0, column=3, sticky="w", padx=6)
-        ttk.Button(a, text="Resolve", command=self._on_resolve).grid(row=0, column=4, padx=4)
-        self.lbl_contract = ttk.Label(a, text="—", style="Panel.TLabel")
-        self.lbl_contract.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        # ===== hero dashboard =====
+        dash = ttk.Frame(root, style="TFrame", padding=(20, 16))
+        dash.pack(fill="x")
+        self.lbl_count = self._stat(dash, "Countdown to fire", 0, big=True)
+        self.lbl_fire = self._stat(dash, "Next fire", 1)
+        self.lbl_price = self._stat(dash, "Last price", 2)
+        self.lbl_range = self._stat(dash, "Overnight range", 3)
 
-        # ---- strategy ----
-        s = self._panel(self.root, "3 · Strategy")
-        self.var_points = tk.StringVar(value=str(self.settings.entry_points))
-        self.var_sl = tk.StringVar(value=str(self.settings.stop_loss_points))
-        self.var_tp = tk.StringVar(value=str(self.settings.take_profit_points))
-        self.var_contracts = tk.StringVar(value=str(self.settings.contracts))
-        self._row(s, "Entry points (±)", self.var_points, 0, width=8)
-        self._row(s, "Stop-loss points", self.var_sl, 1, width=8)
-        self._row(s, "Take-profit points", self.var_tp, 2, width=8)
-        self._row(s, "Contracts", self.var_contracts, 3, width=8)
-        self.var_mode = tk.StringVar(value=self.settings.trade_mode)
-        ttk.Label(s, text="Mode", style="Panel.TLabel").grid(row=0, column=2, sticky="w", padx=(20, 0))
-        ttk.Radiobutton(s, text="Semi-Auto (you manage)", variable=self.var_mode,
-                        value="semi_auto").grid(row=1, column=2, sticky="w", padx=(20, 0))
-        ttk.Radiobutton(s, text="One-Trade (auto OCO)", variable=self.var_mode,
-                        value="one_trade").grid(row=2, column=2, sticky="w", padx=(20, 0))
-        self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
-        self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
-        ttk.Checkbutton(s, text="use live data feed", variable=self.var_live_data).grid(
-            row=3, column=2, sticky="w", padx=(20, 0))
-        ttk.Checkbutton(s, text="DRY-RUN (no real orders)", variable=self.var_dry,
-                        command=self._on_dry_toggle).grid(row=4, column=2, sticky="w", padx=(20, 0))
-        ttk.Button(s, text="Save settings", command=self._on_save).grid(row=4, column=0, sticky="w", pady=(8, 0))
-
-        # ---- test ----
-        t = self._panel(self.root, "3b · Test — verify it actually places orders")
-        self.var_test_mode = tk.BooleanVar(value=self.settings.test_mode)
-        ttk.Checkbutton(t, text="Test mode: fire at a custom time (not 9:30)",
-                        variable=self.var_test_mode, command=self._on_test_toggle).grid(
-            row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(t, text="Fire at (HH:MM:SS, your local time)", style="Panel.TLabel").grid(
-            row=1, column=0, sticky="w", pady=3)
-        self.var_test_time = tk.StringVar(value=self.settings.test_fire_time)
-        ttk.Entry(t, textvariable=self.var_test_time, width=12).grid(row=1, column=1, sticky="w")
-        tk.Button(t, text="Fire TEST now", command=self._on_fire_now, bg=AMBER, fg="white",
-                  font=("Helvetica", 10, "bold"), relief="flat").grid(row=1, column=2, padx=12)
-        ttk.Label(t, text="Use a SIM/practice account. With test mode on, Save then Arm and it fires at that time; "
-                          "or click ‘Fire TEST now’. Honors dry-run.",
-                  style="Panel.TLabel", foreground=AMBER, wraplength=560).grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
-
-        # ---- dashboard ----
-        d = self._panel(self.root, "4 · Dashboard")
-        self.lbl_price = self._metric(d, "Last price", "—", 0)
-        self.lbl_range = self._metric(d, "Overnight range", "—", 1)
-        self.lbl_fire = self._metric(d, "Next fire (ET)", "—", 2)
-        ttk.Label(d, text="Countdown", style="Panel.TLabel").grid(row=0, column=3, padx=(24, 6))
-        self.lbl_count = ttk.Label(d, text="—:—:—", style="Big.TLabel")
-        self.lbl_count.grid(row=1, column=3, rowspan=2, padx=(24, 6))
-
-        # ---- controls ----
-        ctrl = ttk.Frame(self.root, style="TFrame")
-        ctrl.pack(fill="x", padx=12, pady=10)
-        self.btn_arm = tk.Button(ctrl, text="ARM", command=self._on_arm, bg=GREEN, fg="white",
-                                 font=("Helvetica", 12, "bold"), width=14, relief="flat")
+        # ===== control bar =====
+        ctrl = ttk.Frame(root, style="TFrame", padding=(20, 2))
+        ctrl.pack(fill="x")
+        self.btn_arm = ttk.Button(ctrl, text="ARM", command=self._on_arm, style="Success.TButton", width=11)
         self.btn_arm.pack(side="left")
-        self.btn_panic = tk.Button(ctrl, text="EMERGENCY STOP", command=self._on_panic, bg=RED,
-                                   fg="white", font=("Helvetica", 12, "bold"), width=20, relief="flat")
+        self.lbl_mode_banner = ttk.Label(ctrl, text="", style="Banner.TLabel")
+        self.lbl_mode_banner.pack(side="left", padx=18)
+        self.btn_panic = ttk.Button(ctrl, text="■  EMERGENCY STOP", command=self._on_panic, style="Danger.TButton")
         self.btn_panic.pack(side="right")
-        self.lbl_mode_banner = tk.Label(ctrl, text="", bg=BG, fg=AMBER, font=("Helvetica", 11, "bold"))
-        self.lbl_mode_banner.pack(side="left", padx=16)
 
-        # ---- log ----
-        lf = self._panel(self.root, "5 · Log")
-        self.txt = tk.Text(lf, height=10, bg="#0f1316", fg=FG, insertbackground=FG,
-                           wrap="word", relief="flat")
-        self.txt.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(lf, command=self.txt.yview)
-        sb.grid(row=0, column=1, sticky="ns")
+        # ===== settings notebook =====
+        nb = ttk.Notebook(root)
+        nb.pack(fill="x", padx=20, pady=(16, 8))
+        self._build_tab_connect(nb)
+        self._build_tab_strategy(nb)
+        self._build_tab_test(nb)
+
+        # ===== log =====
+        logwrap = ttk.Frame(root, style="Surface.TFrame", padding=10)
+        logwrap.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        topbar = ttk.Frame(logwrap, style="Surface.TFrame")
+        topbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Label(topbar, text="ACTIVITY LOG", background=SURFACE, foreground=MUTED,
+                  font=(FONT, 9, "bold")).pack(side="left")
+        ttk.Button(topbar, text="Save log…", command=self._on_save_log, style="Ghost.TButton").pack(side="right")
+        self.txt = tk.Text(logwrap, height=9, wrap="word", relief="flat", borderwidth=0,
+                           background="#0b0e14", foreground=FG, insertbackground=FG,
+                           font=(MONO, 10), padx=12, pady=10, highlightthickness=0)
+        self.txt.grid(row=1, column=0, sticky="nsew")
+        sb = ttk.Scrollbar(logwrap, command=self.txt.yview)
+        sb.grid(row=1, column=1, sticky="ns")
         self.txt.configure(yscrollcommand=sb.set, state="disabled")
-        lf.columnconfigure(0, weight=1)
-        ttk.Button(lf, text="Save log…", command=self._on_save_log).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        logwrap.columnconfigure(0, weight=1)
+        logwrap.rowconfigure(1, weight=1)
 
         self._update_mode_banner()
         self._on_backend_change()
 
-    def _row(self, parent, label, var, r, width=20):
-        ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=3)
-        ttk.Entry(parent, textvariable=var, width=width).grid(row=r, column=1, sticky="w")
+    def _build_tab_connect(self, nb) -> None:
+        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
+        nb.add(tab, text="Connect")
+        self._surface(tab)  # register surface-bg style variants used inside tabs
 
-    def _metric(self, parent, label, value, col):
-        ttk.Label(parent, text=label, style="Panel.TLabel").grid(row=0, column=col, padx=6, sticky="w")
-        lbl = ttk.Label(parent, text=value, style="Panel.TLabel", font=("Helvetica", 13, "bold"))
-        lbl.grid(row=1, column=col, padx=6, sticky="w")
-        return lbl
+        self.var_backend = tk.StringVar(value=self.settings.backend)
+        ttk.Label(tab, text="Backend", style="Hs.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Radiobutton(tab, text="API (TopstepX — recommended)", variable=self.var_backend,
+                        value="api", command=self._on_backend_change, style="S.TRadiobutton").grid(
+            row=0, column=1, sticky="w", padx=10)
+        ttk.Radiobutton(tab, text="Browser automation", variable=self.var_backend,
+                        value="browser", command=self._on_backend_change, style="S.TRadiobutton").grid(
+            row=0, column=2, sticky="w", padx=10)
+
+        row2 = ttk.Frame(tab, style="Surface.TFrame")
+        row2.grid(row=1, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        ttk.Label(row2, text="Platform", style="Sm.TLabel").pack(side="left")
+        self.var_platform = tk.StringVar(value=self.settings.browser_platform)
+        self.cmb_platform = ttk.Combobox(row2, state="readonly", width=12, values=["projectx", "tradesea"],
+                                         textvariable=self.var_platform, font=(FONT, 11))
+        self.cmb_platform.pack(side="left", padx=(8, 18))
+        self.var_use_chrome = tk.BooleanVar(value=self.settings.chrome_channel == "chrome")
+        ttk.Checkbutton(row2, text="Use my installed Google Chrome", variable=self.var_use_chrome,
+                        style="S.TCheckbutton").pack(side="left")
+
+        self.lbl_backend_hint = ttk.Label(tab, text="", style="Hint.TLabel", wraplength=840)
+        self.lbl_backend_hint.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 12))
+        ttk.Separator(tab).grid(row=3, column=0, columnspan=4, sticky="ew", pady=4)
+
+        self.var_base = tk.StringVar(value=self.settings.base_url)
+        self.var_user = tk.StringVar(value=self.settings.username)
+        self.var_key = tk.StringVar(value="")
+        self.var_remember = tk.BooleanVar(value=True)
+        self._sfield(tab, "Base URL", self.var_base, 4, width=34)
+        self._sfield(tab, "Username", self.var_user, 5, width=26)
+        self._sfield(tab, "API key", self.var_key, 6, width=34, show="•")
+        ttk.Checkbutton(tab, text="Remember on this device", variable=self.var_remember,
+                        style="S.TCheckbutton").grid(row=7, column=1, sticky="w", pady=(2, 10))
+        self.btn_connect = ttk.Button(tab, text="Connect", command=self._on_connect, style="Accent.TButton")
+        self.btn_connect.grid(row=8, column=1, sticky="w")
+        self.lbl_conn = ttk.Label(tab, text="not connected", style="Warn.TLabel")
+        self.lbl_conn.grid(row=8, column=2, columnspan=2, sticky="w", padx=10)
+
+    def _build_tab_strategy(self, nb) -> None:
+        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
+        nb.add(tab, text="Strategy")
+
+        ttk.Label(tab, text="Account", style="Sm.TLabel").grid(row=0, column=0, sticky="w", pady=5)
+        self.cmb_account = ttk.Combobox(tab, state="readonly", width=30, values=[], font=(FONT, 11))
+        self.cmb_account.grid(row=0, column=1, sticky="w", padx=8)
+        self.cmb_account.bind("<<ComboboxSelected>>", self._on_account_pick)
+        ttk.Label(tab, text="Symbol", style="Sm.TLabel").grid(row=0, column=2, sticky="w", padx=(16, 0))
+        self.var_symbol = tk.StringVar(value=self.settings.contract_symbol)
+        ttk.Entry(tab, textvariable=self.var_symbol, width=10, font=(FONT, 11)).grid(row=0, column=3, sticky="w", padx=8)
+        ttk.Button(tab, text="Resolve", command=self._on_resolve, style="Ghost.TButton").grid(row=0, column=4, padx=4)
+        self.lbl_contract = ttk.Label(tab, text="—", style="Sm.TLabel")
+        self.lbl_contract.grid(row=1, column=0, columnspan=5, sticky="w", pady=(4, 10))
+        ttk.Separator(tab).grid(row=2, column=0, columnspan=5, sticky="ew", pady=4)
+
+        self.var_points = tk.StringVar(value=str(self.settings.entry_points))
+        self.var_sl = tk.StringVar(value=str(self.settings.stop_loss_points))
+        self.var_tp = tk.StringVar(value=str(self.settings.take_profit_points))
+        self.var_contracts = tk.StringVar(value=str(self.settings.contracts))
+        self._sfield(tab, "Entry points (±)", self.var_points, 3, width=8)
+        self._sfield(tab, "Stop-loss points", self.var_sl, 4, width=8)
+        self._sfield(tab, "Take-profit points", self.var_tp, 5, width=8)
+        self._sfield(tab, "Contracts", self.var_contracts, 6, width=8)
+
+        self.var_mode = tk.StringVar(value=self.settings.trade_mode)
+        ttk.Label(tab, text="Mode", style="Hs.TLabel").grid(row=3, column=2, sticky="w", padx=(28, 0))
+        ttk.Radiobutton(tab, text="Semi-Auto (you manage)", variable=self.var_mode, value="semi_auto",
+                        style="S.TRadiobutton").grid(row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Radiobutton(tab, text="One-Trade (auto OCO)", variable=self.var_mode, value="one_trade",
+                        style="S.TRadiobutton").grid(row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
+        self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
+        ttk.Checkbutton(tab, text="Use live data feed", variable=self.var_live_data,
+                        style="S.TCheckbutton").grid(row=6, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
+                        style="S.TCheckbutton").grid(row=7, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Button(tab, text="Save settings", command=self._on_save, style="Accent.TButton").grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
+    def _build_tab_test(self, nb) -> None:
+        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
+        nb.add(tab, text="Test")
+        ttk.Label(tab, text="Verify it actually places orders", style="Hs.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w")
+        self.var_test_mode = tk.BooleanVar(value=self.settings.test_mode)
+        ttk.Checkbutton(tab, text="Test mode: fire at a custom time (instead of 9:30)",
+                        variable=self.var_test_mode, command=self._on_test_toggle,
+                        style="S.TCheckbutton").grid(row=1, column=0, columnspan=3, sticky="w", pady=(10, 6))
+        ttk.Label(tab, text="Fire at (HH:MM:SS, your local time)", style="Sm.TLabel").grid(
+            row=2, column=0, sticky="w", pady=5)
+        self.var_test_time = tk.StringVar(value=self.settings.test_fire_time)
+        ttk.Entry(tab, textvariable=self.var_test_time, width=12, font=(FONT, 11)).grid(row=2, column=1, sticky="w")
+        ttk.Button(tab, text="⚡  Fire TEST now", command=self._on_fire_now, style="Warning.TButton").grid(
+            row=2, column=2, padx=16)
+        ttk.Label(tab, text="Use a SIM / practice account. With test mode on: Save → Arm and it fires at "
+                            "that time; or click ‘Fire TEST now’. Honors dry-run.",
+                  style="Hint.TLabel", wraplength=840).grid(row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+    def _surface(self, tab):
+        """Register surface-bg variants of styles used inside notebook tabs (once)."""
+        st = self.st
+        st.configure("Sm.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 10))
+        st.configure("Hs.TLabel", background=SURFACE, foreground=FG, font=(FONT, 10, "bold"))
+        st.configure("Hint.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 9))
+        st.configure("Warn.TLabel", background=SURFACE, foreground=AMBER_H, font=(FONT, 10))
+        st.configure("S.TCheckbutton", background=SURFACE, foreground=FG, font=(FONT, 10))
+        st.map("S.TCheckbutton", background=[("active", SURFACE)], indicatorcolor=[("selected", ACCENT)])
+        st.configure("S.TRadiobutton", background=SURFACE, foreground=FG, font=(FONT, 10))
+        st.map("S.TRadiobutton", background=[("active", SURFACE)], indicatorcolor=[("selected", ACCENT)])
+
+    def _sfield(self, parent, label, var, r, c=0, width=18, show=None):
+        ttk.Label(parent, text=label, style="Sm.TLabel").grid(row=r, column=c, sticky="w", padx=(0, 8), pady=5)
+        ent = ttk.Entry(parent, textvariable=var, width=width, font=(FONT, 11))
+        if show:
+            ent.configure(show=show)
+        ent.grid(row=r, column=c + 1, sticky="w", pady=5)
+        return ent
 
     # ---------------------------------------------------------- settings io
     def _load_into_widgets(self) -> None:
         key = load_api_key(self.settings.username) if self.settings.username else None
         if key:
             self.var_key.set(key)
-            self.lbl_conn.configure(text="API key found — click Connect", foreground=AMBER)
+            self.lbl_conn.configure(text="API key found — click Connect")
 
     def _collect_settings(self) -> Optional[Settings]:
         s = self.settings
@@ -307,9 +467,9 @@ class ImbabotGUI:
 
     def _update_mode_banner(self) -> None:
         if not self.var_dry.get():
-            self.lbl_mode_banner.configure(text="● LIVE — REAL ORDERS", fg=RED)
+            self.lbl_mode_banner.configure(text="● LIVE — REAL ORDERS", foreground=RED_H)
         else:
-            self.lbl_mode_banner.configure(text="● DRY-RUN — no orders sent", fg=GREEN)
+            self.lbl_mode_banner.configure(text="● DRY-RUN — no orders sent", foreground=GREEN_H)
 
     # ------------------------------------------------------------- actions
     def _on_backend_change(self) -> None:
@@ -317,11 +477,11 @@ class ImbabotGUI:
         self.btn_connect.configure(text="Launch Browser" if browser else "Connect")
         if browser:
             self.lbl_backend_hint.configure(
-                text="Browser mode: a real browser opens; you log in, then Arm. "
-                     "Selectors for live sites need calibration (see README).")
+                text="Browser mode: a real Chrome window opens; you log in, then Arm. TopstepX (projectx) "
+                     "ships pre-calibrated — use Semi-Auto.")
         else:
             self.lbl_backend_hint.configure(
-                text="API mode: official TopstepX API. Needs your API key (recommended).")
+                text="API mode: official TopstepX API (recommended). Needs your API key.")
 
     def _on_connect(self) -> None:
         s = self._collect_settings()
@@ -338,7 +498,7 @@ class ImbabotGUI:
         if self.var_remember.get():
             backend = store_api_key(s.username, key)
             self.log(f"API key stored via {backend}.")
-        self.lbl_conn.configure(text="connecting…", foreground=AMBER)
+        self.lbl_conn.configure(text="connecting…")
         self.btn_connect.configure(state="disabled")
         threading.Thread(target=self._connect_worker, args=(s, key), daemon=True).start()
 
@@ -360,13 +520,12 @@ class ImbabotGUI:
         try:
             from .browser import BrowserController
         except Exception as exc:
-            messagebox.showerror("Playwright missing",
-                                 f"Browser mode needs Playwright:\n\n"
-                                 f"pip install playwright\nplaywright install chromium\n\n{exc}")
+            messagebox.showerror("Browser backend unavailable",
+                                 f"Browser mode needs Selenium + Chrome.\n\n{exc}")
             return
         self.controller = BrowserController(s, log=self.log)
         self.controller.launch()
-        self.lbl_conn.configure(text=f"browser launching · {s.browser_platform}", foreground=AMBER)
+        self.lbl_conn.configure(text=f"browser launching · {s.browser_platform}")
         self.log(f"Browser backend launching for {s.browser_platform}. Log in, then Arm.")
         self._start_poller()
 
@@ -406,7 +565,7 @@ class ImbabotGUI:
             return
         if self.engine.armed:
             self.engine.disarm()
-            self.btn_arm.configure(text="ARM", bg=GREEN)
+            self.btn_arm.configure(text="ARM", style="Success.TButton")
             return
         s = self._collect_settings()
         if not s:
@@ -424,7 +583,7 @@ class ImbabotGUI:
                 return
         try:
             self.engine.arm(on_tick=None)
-            self.btn_arm.configure(text="DISARM", bg=AMBER)
+            self.btn_arm.configure(text="DISARM", style="Warning.TButton")
         except Exception as exc:
             messagebox.showerror("Arm refused", str(exc))
             self.log(f"Arm refused: {exc}", "error")
@@ -435,7 +594,7 @@ class ImbabotGUI:
             return
         if self.controller.state in ("armed", "monitoring"):
             self.controller.disarm()
-            self.btn_arm.configure(text="ARM", bg=GREEN)
+            self.btn_arm.configure(text="ARM", style="Success.TButton")
             return
         s = self._collect_settings()
         if not s:
@@ -453,7 +612,7 @@ class ImbabotGUI:
             ):
                 return
         self.controller.arm()
-        self.btn_arm.configure(text="DISARM", bg=AMBER)
+        self.btn_arm.configure(text="DISARM", style="Warning.TButton")
 
     def _on_panic(self) -> None:
         if self.var_backend.get() == "browser":
@@ -463,7 +622,7 @@ class ImbabotGUI:
                                        "Cancel ALL orders and flatten ALL positions now?",
                                        icon="warning"):
                 return
-            self.btn_arm.configure(text="ARM", bg=GREEN)
+            self.btn_arm.configure(text="ARM", style="Success.TButton")
             self.controller.panic()
             return
         if not self.engine:
@@ -472,7 +631,7 @@ class ImbabotGUI:
                                    "Cancel ALL orders and flatten ALL positions now?",
                                    icon="warning"):
             return
-        self.btn_arm.configure(text="ARM", bg=GREEN)
+        self.btn_arm.configure(text="ARM", style="Success.TButton")
         threading.Thread(target=self.engine.emergency_stop, daemon=True).start()
 
     def _on_test_toggle(self) -> None:
@@ -535,11 +694,11 @@ class ImbabotGUI:
     def _handle_event(self, evt: tuple) -> None:
         kind = evt[0]
         if kind == "log":
-            self._append_log(evt[1])
+            self._append_log(evt[1], evt[2] if len(evt) > 2 else "info")
         elif kind == "connected":
             self.engine, self.accounts = evt[1], evt[2]
             self.btn_connect.configure(state="normal")
-            self.lbl_conn.configure(text=f"connected · {self.engine.account.name}", foreground=GREEN)
+            self.lbl_conn.configure(text=f"connected · {self.engine.account.name}")
             names = [f"{a.name} (id={a.id}){'' if a.can_trade else ' [locked]'}" for a in self.accounts]
             self.cmb_account.configure(values=names)
             for i, a in enumerate(self.accounts):
@@ -552,23 +711,41 @@ class ImbabotGUI:
             self._start_poller()
         elif kind == "connect_failed":
             self.btn_connect.configure(state="normal")
-            self.lbl_conn.configure(text=f"connect failed: {evt[1]}", foreground=RED)
+            self.lbl_conn.configure(text=f"connect failed: {evt[1]}")
             messagebox.showerror("Connection failed", evt[1])
         elif kind == "contract":
             self.lbl_contract.configure(text=evt[1])
         elif kind == "dashboard":
             price, rng = evt[1], evt[2]
             self.lbl_price.configure(text=f"{price:g}" if price is not None else "—")
-            self.lbl_range.configure(
-                text=f"{rng['low']:g} – {rng['high']:g}" if rng else "—")
+            self.lbl_range.configure(text=f"{rng['low']:g}–{rng['high']:g}" if rng else "—")
         elif kind == "error":
             self.log(evt[1], "error")
 
-    def _append_log(self, line: str) -> None:
+    def _append_log(self, line: str, level: str = "info") -> None:
         self.txt.configure(state="normal")
-        self.txt.insert("end", line + "\n")
+        if "error" not in self.txt.tag_names():
+            self.txt.tag_configure("error", foreground=RED_H)
+            self.txt.tag_configure("warn", foreground=AMBER_H)
+            self.txt.tag_configure("info", foreground=FG)
+        tag = level if level in ("warn", "error") else "info"
+        self.txt.insert("end", line + "\n", tag)
         self.txt.see("end")
         self.txt.configure(state="disabled")
+
+    def _refresh_badges(self) -> None:
+        if self.controller is not None:
+            ok = getattr(self.controller, "logged_in", False)
+            self._set_pill(self.badge_conn, "Browser ready" if ok else "Browser…", "Ok" if ok else "Warn")
+        elif self.engine is not None:
+            self._set_pill(self.badge_conn, "Connected", "Ok")
+        else:
+            self._set_pill(self.badge_conn, "Offline", "Sec")
+        live = not self.var_dry.get()
+        self._set_pill(self.badge_mode, "● LIVE" if live else "● DRY-RUN", "Bad" if live else "Ok")
+        armed = bool((self.engine and self.engine.armed) or
+                     (self.controller and getattr(self.controller, "state", "") in ("armed", "monitoring")))
+        self._set_pill(self.badge_armed, "ARMED" if armed else "DISARMED", "Warn" if armed else "Sec")
 
     def _tick_countdown(self) -> None:
         try:
@@ -582,11 +759,12 @@ class ImbabotGUI:
                     try:
                         d_fire = next_local_fire(tt)
                     except Exception:
-                        d_fire = None  # malformed time -> fall back to the market open
+                        d_fire = None
             if d_fire is None:
                 d_fire = next_fire_time(s.open_time(), s.capture_offset_seconds, s.market_tz)
-            self.lbl_fire.configure(text=d_fire.strftime("%H:%M:%S %Z"))
+            self.lbl_fire.configure(text=d_fire.strftime("%H:%M:%S"))
             self.lbl_count.configure(text=format_countdown(seconds_until(d_fire)))
+            self._refresh_badges()
         except Exception:
             pass
         self.root.after(1000, self._tick_countdown)
@@ -599,8 +777,6 @@ class ImbabotGUI:
         while not self._poll_stop.is_set() and (self.engine or self.controller):
             try:
                 if self.settings.backend == "browser" and self.controller:
-                    # The controller reads price on its own (Playwright) thread; we
-                    # only read the cached value here — never touch Playwright cross-thread.
                     self.events.put(("dashboard", self.controller.last_price, None))
                 elif self.engine:
                     self.events.put(("dashboard", self.engine.last_price(), self.engine.overnight_range()))
@@ -621,8 +797,12 @@ class ImbabotGUI:
 
 
 def main() -> int:
+    shot_path = None
+    if "--shot" in sys.argv:
+        i = sys.argv.index("--shot")
+        shot_path = sys.argv[i + 1] if i + 1 < len(sys.argv) else "/tmp/imba_gui.png"
     root = tk.Tk()
-    app = ImbabotGUI(root)
+    app = ImbabotGUI(root, shot_path=shot_path)
     if not root.winfo_exists():
         return 0
     root.protocol("WM_DELETE_WINDOW", app.on_close)
