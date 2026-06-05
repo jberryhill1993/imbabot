@@ -1,0 +1,91 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec — builds Imbabot for the platform it runs on.
+
+  • Windows  ->  dist/Imbabot.exe        (single-file, double-clickable)
+  • macOS    ->  dist/Imbabot.app        (proper onedir .app bundle)
+
+PyInstaller cannot cross-compile, so build each on its own OS (or use the
+GitHub Actions matrix in .github/workflows/build-exe.yml, which builds both).
+
+Build:
+    pip install -r requirements.txt pyinstaller
+    pyinstaller imbabot.spec --noconfirm
+
+Notes
+- collect_all('tzdata') bundles the IANA tz DB so the 09:30 ET scheduling works on
+  a clean machine (otherwise zoneinfo raises "No time zone found").
+- keyring's backends load dynamically -> pulled in as hiddenimports.
+- Playwright is excluded to keep the binary lean; browser mode runs from source.
+- Drop an icon at assets/imbabot.ico (Windows) / assets/imbabot.icns (macOS).
+"""
+import os
+import sys
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+datas, binaries, hiddenimports = [], [], []
+
+# tzdata: timezone DB for 09:30 ET scheduling.
+# selenium: the browser backend that drives the user's installed Chrome — including
+#   its bundled selenium-manager binary (a data file) that resolves chromedriver.
+for pkg in ("tzdata", "selenium"):
+    d, b, h = collect_all(pkg)
+    datas += d
+    binaries += b
+    hiddenimports += h
+
+hiddenimports += collect_submodules("keyring")
+hiddenimports += ["imbabot.gui", "imbabot.engine", "imbabot.projectx", "imbabot.cli"]
+
+# Browser selector packs are JSON data files PyInstaller won't auto-collect — bundle
+# them so the (calibrated) packs ship inside the .exe/.app for downloaders.
+datas += [("imbabot/browser/selectors", "imbabot/browser/selectors")]
+
+_is_mac = sys.platform == "darwin"
+_icon = None
+for cand in ("assets/imbabot.icns", "assets/imbabot.ico"):
+    if os.path.exists(cand):
+        _icon = cand
+        break
+
+a = Analysis(
+    ["run.py"],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    runtime_hooks=[],
+    # Keep it lean: browser mode (Playwright + Chromium) runs from source.
+    excludes=["numpy", "pandas", "matplotlib", "PyQt5", "PySide2", "playwright"],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+
+if _is_mac:
+    # onedir + .app bundle (the supported macOS GUI layout)
+    exe = EXE(
+        pyz, a.scripts, [], exclude_binaries=True,
+        name="Imbabot", console=False, strip=False, upx=False, icon=_icon,
+    )
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Imbabot")
+    app = BUNDLE(
+        coll,
+        name="Imbabot.app",
+        icon=_icon,
+        bundle_identifier="com.imbabot.app",
+        info_plist={
+            "CFBundleName": "Imbabot",
+            "CFBundleDisplayName": "Imbabot",
+            "CFBundleShortVersionString": "0.1.0",
+            "NSHighResolutionCapable": True,
+            "LSApplicationCategoryType": "public.app-category.finance",
+        },
+    )
+else:
+    # Windows / Linux: single-file executable
+    exe = EXE(
+        pyz, a.scripts, a.binaries, a.datas, [],
+        name="Imbabot", debug=False, bootloader_ignore_signals=False, strip=False,
+        upx=True, runtime_tmpdir=None, console=False,
+        disable_windowed_traceback=False, icon=_icon,
+    )

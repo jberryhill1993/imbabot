@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock Trader — Imbabot browser test harness</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#11151a; color:#e6e6e6; padding:18px; }
+  h1 { font-size:16px; } .row { margin:6px 0; }
+  #price { font-size:28px; font-weight:bold; color:#4da3ff; }
+  #position { font-size:20px; font-weight:bold; }
+  input, select, button { padding:4px 8px; margin:2px; background:#1b2027; color:#e6e6e6; border:1px solid #333; }
+  button { cursor:pointer; }
+  .tab.active { background:#2d7d46; }
+  table { border-collapse:collapse; margin-top:8px; } td,th { border:1px solid #2a2f36; padding:4px 10px; }
+  .cancel { background:#7a2222; }
+</style>
+</head>
+<body id="app">
+  <!-- This element's presence is the "logged in / chart ready" indicator. -->
+  <div id="chart">
+    <h1>MOCK NQ CHART</h1>
+    <div class="row">Price: <span id="price">29464.75</span></div>
+    <div class="row">Net position: <span id="position">0</span></div>
+  </div>
+
+  <div class="row">
+    <button id="buy-tab" class="tab" onclick="setSide('buy')">BUY</button>
+    <button id="sell-tab" class="tab" onclick="setSide('sell')">SELL</button>
+    <select id="order-type"><option>Market</option><option>Stop</option><option>Limit</option></select>
+    Stop <input id="stop-price" size="10">
+    Qty <input id="quantity" size="4">
+    SL <input id="sl-points" size="4">
+    TP <input id="tp-points" size="4">
+    <button id="submit" onclick="submitOrder()">Submit</button>
+  </div>
+
+  <div class="row">
+    <button id="cancel-all" onclick="cancelAll()">Cancel all</button>
+    <button id="flatten" onclick="flatten()">Flatten</button>
+  </div>
+
+  <table id="orders">
+    <thead><tr><th>Side</th><th>Type</th><th>Price</th><th>Qty</th><th></th></tr></thead>
+    <tbody id="orders-body"></tbody>
+  </table>
+
+<script>
+  let side = 'buy';
+  function setSide(s){ side = s;
+    document.getElementById('buy-tab').classList.toggle('active', s==='buy');
+    document.getElementById('sell-tab').classList.toggle('active', s==='sell'); }
+
+  function submitOrder(){
+    const price = document.getElementById('stop-price').value;
+    const qty   = document.getElementById('quantity').value;
+    const type  = document.getElementById('order-type').value;
+    const tr = document.createElement('tr');
+    tr.className = 'order';
+    tr.dataset.side = side; tr.dataset.price = price; tr.dataset.qty = qty;
+    tr.innerHTML = `<td>${side.toUpperCase()}</td><td>${type}</td>`
+                 + `<td class="px">${price}</td><td>${qty}</td>`
+                 + `<td><button class="cancel" onclick="this.closest('tr').remove()">x</button></td>`;
+    document.getElementById('orders-body').appendChild(tr);
+  }
+
+  function cancelAll(){ document.getElementById('orders-body').innerHTML=''; }
+  function flatten(){ document.getElementById('position').textContent='0'; cancelAll(); }
+
+  // Test hook: pretend a side's entry filled -> set net position and remove that entry row
+  // (its bracket would now be live; the OPPOSITE entry must be cancelled by the bot).
+  window.simulateFill = function(s){
+    const rows = [...document.querySelectorAll('tr.order')].filter(r => r.dataset.side === s);
+    if(!rows.length) return;
+    const qty = parseInt(rows[0].dataset.qty || '0', 10);
+    document.getElementById('position').textContent = (s==='buy' ? qty : -qty).toString();
+    rows.forEach(r => r.remove());   // entry becomes a position
+  };
+</script>
+</body>
+</html>

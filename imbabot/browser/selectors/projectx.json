@@ -1,0 +1,35 @@
+{
+  "_comment": "CALIBRATED + LIVE-TESTED against TopstepX PRACTICE (PRAC-V2) 2026-06-04. VERIFIED: selectors resolve; clicking BUY/SELL submits with NO confirmation dialog; the order submits at the TYPED stop price ONLY when set via real keystrokes + a Tab/blur (a JS value-set leaves the order on the STALE price — that's why buy/sell use 'fill' then 'press Tab', not 'set_value'). PREREQS before arming: (1) order card 'Order Type' = 'Stop Market' (persists); (2) set your Position Bracket (SL/TP) in TopStep's bracket settings — there are no per-order SL/TP fields, so the bot's stop_loss_points/take_profit_points are NOT pushed here; (3) keep the chart on the contract you trade (price is read from the page title). cancel_by_price + position_size are grounded but NOT yet tested with an actual fill — use SEMI-AUTO until you verify One-Trade in sim. Test dry-run, then SIM, before any funded use.",
+  "name": "projectx",
+  "url": "https://topstepx.com/",
+  "logged_in": "[data-testid=\"user-layout-container\"]",
+  "price": "",
+  "price_js": "parseFloat((document.title.match(/\\$([0-9,]+\\.?[0-9]*)/)||['',''])[1].replace(/,/g,''))",
+  "position_size": "[data-testid=\"order-card-display-value-position\"]",
+  "order_method": "dom",
+  "actions": {
+    "buy": [
+      {"action": "fill", "selector": "[data-testid=\"order-card-input-field-stop-price\"] input", "value": "$trigger_price"},
+      {"action": "press", "selector": "[data-testid=\"order-card-input-field-stop-price\"] input", "key": "Tab"},
+      {"action": "fill", "selector": "[data-testid=\"order-card-input-field-contracts\"] input", "value": "$size"},
+      {"action": "press", "selector": "[data-testid=\"order-card-input-field-contracts\"] input", "key": "Tab"},
+      {"action": "click", "selector": "[data-testid=\"order-card-click-button-buy\"]"}
+    ],
+    "sell": [
+      {"action": "fill", "selector": "[data-testid=\"order-card-input-field-stop-price\"] input", "value": "$trigger_price"},
+      {"action": "press", "selector": "[data-testid=\"order-card-input-field-stop-price\"] input", "key": "Tab"},
+      {"action": "fill", "selector": "[data-testid=\"order-card-input-field-contracts\"] input", "value": "$size"},
+      {"action": "press", "selector": "[data-testid=\"order-card-input-field-contracts\"] input", "key": "Tab"},
+      {"action": "click", "selector": "[data-testid=\"order-card-click-button-sell\"]"}
+    ],
+    "cancel_all": [
+      {"action": "click", "selector": "[data-testid=\"order-card-click-button-cancel-all\"]"}
+    ],
+    "flatten": [
+      {"action": "click", "selector": "[data-testid=\"order-card-click-button-flatten-all\"]"}
+    ],
+    "cancel_by_price": [
+      {"action": "click", "selector": "//*[@role=\"row\"][contains(translate(., ',', ''), '$price')]//button[starts-with(@data-testid, \"orders-click-button-cancel-\")]"}
+    ]
+  }
+}

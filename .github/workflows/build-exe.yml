@@ -1,0 +1,66 @@
+name: Build Imbabot (Windows + macOS)
+
+# PyInstaller can't cross-compile, so we build each platform on its own runner.
+# One push produces BOTH a Windows .exe and a macOS .app, uploaded as artifacts.
+# Trigger automatically on push, or manually from the Actions tab.
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest      # GitHub's macOS runner is Apple Silicon (arm64)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Install Chromium for browser-backend tests
+        run: python -m playwright install chromium
+
+      - name: Run all test suites (both backends)
+        run: python tests/run_all.py
+
+      - name: Build (PyInstaller)
+        run: pyinstaller imbabot.spec --noconfirm
+
+      # ---- Windows: single .exe ----
+      - name: Upload Windows exe
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Imbabot-windows
+          path: dist/Imbabot.exe
+          if-no-files-found: error
+
+      # ---- macOS: ad-hoc sign + zip the .app ----
+      - name: Package macOS .app
+        if: runner.os == 'macOS'
+        run: |
+          xattr -cr dist/Imbabot.app || true
+          codesign --force --deep -s - dist/Imbabot.app || true
+          codesign --verify --strict dist/Imbabot.app || true
+          ditto -c -k --sequesterRsrc --keepParent dist/Imbabot.app dist/Imbabot-macOS-arm64.zip
+
+      - name: Upload macOS app
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Imbabot-macOS-arm64
+          path: dist/Imbabot-macOS-arm64.zip
+          if-no-files-found: error

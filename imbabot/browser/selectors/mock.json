@@ -1,0 +1,37 @@
+{
+  "name": "mock",
+  "url": "",
+  "logged_in": "#chart",
+  "price": "#price",
+  "position_size": "#position",
+  "order_method": "dom",
+  "actions": {
+    "buy": [
+      {"action": "click", "selector": "#buy-tab"},
+      {"action": "select", "selector": "#order-type", "value": "Stop"},
+      {"action": "set_value", "selector": "#stop-price", "value": "$trigger_price"},
+      {"action": "set_value", "selector": "#quantity", "value": "$size"},
+      {"action": "set_value", "selector": "#sl-points", "value": "$sl_points"},
+      {"action": "set_value", "selector": "#tp-points", "value": "$tp_points"},
+      {"action": "click", "selector": "#submit"}
+    ],
+    "sell": [
+      {"action": "click", "selector": "#sell-tab"},
+      {"action": "select", "selector": "#order-type", "value": "Stop"},
+      {"action": "set_value", "selector": "#stop-price", "value": "$trigger_price"},
+      {"action": "set_value", "selector": "#quantity", "value": "$size"},
+      {"action": "set_value", "selector": "#sl-points", "value": "$sl_points"},
+      {"action": "set_value", "selector": "#tp-points", "value": "$tp_points"},
+      {"action": "click", "selector": "#submit"}
+    ],
+    "cancel_by_price": [
+      {"action": "click", "selector": "tr.order[data-price='$price'] .cancel"}
+    ],
+    "cancel_all": [
+      {"action": "click", "selector": "#cancel-all"}
+    ],
+    "flatten": [
+      {"action": "click", "selector": "#flatten"}
+    ]
+  }
+}

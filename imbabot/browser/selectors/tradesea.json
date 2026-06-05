@@ -1,0 +1,35 @@
+{
+  "_comment": "TradeSea / Lucid web trader. PLACEHOLDER selectors — calibrate against the live DOM before using (README 'Calibrating a selector pack'). TradeSea sends a login link by email; sign in once and the persistent browser profile keeps you logged in. Note the guide's warning: TradeSea can freeze on volatile opens and the stop may not display — set a manual stop platform-side.",
+  "name": "tradesea",
+  "url": "https://trade.tradesea.com/",
+  "logged_in": "CALIBRATE: selector present only when the chart is loaded",
+  "price": "CALIBRATE: selector whose text is the live last price",
+  "price_js": "",
+  "position_size": "CALIBRATE: selector whose text is your signed net position",
+  "order_method": "dom",
+  "actions": {
+    "buy": [
+      {"action": "click", "selector": "CALIBRATE: buy tab"},
+      {"action": "select", "selector": "CALIBRATE: order-type dropdown", "value": "Stop"},
+      {"action": "fill", "selector": "CALIBRATE: stop price input", "value": "$trigger_price"},
+      {"action": "fill", "selector": "CALIBRATE: quantity input", "value": "$size"},
+      {"action": "click", "selector": "CALIBRATE: submit/confirm button"}
+    ],
+    "sell": [
+      {"action": "click", "selector": "CALIBRATE: sell tab"},
+      {"action": "select", "selector": "CALIBRATE: order-type dropdown", "value": "Stop"},
+      {"action": "fill", "selector": "CALIBRATE: stop price input", "value": "$trigger_price"},
+      {"action": "fill", "selector": "CALIBRATE: quantity input", "value": "$size"},
+      {"action": "click", "selector": "CALIBRATE: submit/confirm button"}
+    ],
+    "cancel_by_price": [
+      {"action": "click", "selector": "CALIBRATE: working-order row containing '$price' -> its cancel button"}
+    ],
+    "cancel_all": [
+      {"action": "click", "selector": "CALIBRATE: cancel-all-orders button"}
+    ],
+    "flatten": [
+      {"action": "click", "selector": "CALIBRATE: flatten/close-all button"}
+    ]
+  }
+}

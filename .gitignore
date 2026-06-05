@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.manifest
+
+# Secrets / local state — never commit these
+credentials
+settings.json
+*.log
+
+# Icon build intermediates (regenerate with assets/make_icon.py; keep .icns/.ico)
+assets/imbabot.iconset/
+assets/icon_preview.png
+
+# OS
+.DS_Store
+release/

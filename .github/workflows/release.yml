@@ -1,0 +1,64 @@
+name: Release Imbabot
+
+# Publishes downloadable builds to a GitHub Release so other people / other
+# computers can download them from a permanent link, e.g.:
+#   https://github.com/<you>/<repo>/releases/download/v0.1.0/Imbabot.exe
+#   https://github.com/<you>/<repo>/releases/download/v0.1.0/Imbabot-macOS-arm64.zip
+#
+# Trigger by pushing a version tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+# (or run it manually from the Actions tab).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed to create the Release and upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest       # Apple Silicon (arm64)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Install Chromium (browser-backend tests)
+        run: python -m playwright install chromium
+
+      - name: Run all test suites
+        run: python tests/run_all.py
+
+      - name: Build (PyInstaller)
+        run: pyinstaller imbabot.spec --noconfirm
+
+      - name: Package macOS .app
+        if: runner.os == 'macOS'
+        run: |
+          xattr -cr dist/Imbabot.app || true
+          codesign --force --deep -s - dist/Imbabot.app || true
+          ditto -c -k --sequesterRsrc --keepParent dist/Imbabot.app dist/Imbabot-macOS-arm64.zip
+
+      - name: Attach build to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Imbabot.exe
+            dist/Imbabot-macOS-arm64.zip
+          fail_on_unmatched_files: false
+          generate_release_notes: true
