@@ -41,11 +41,11 @@ hiddenimports += ["imbabot.gui", "imbabot.engine", "imbabot.projectx", "imbabot.
 datas += [("imbabot/browser/selectors", "imbabot/browser/selectors")]
 
 _is_mac = sys.platform == "darwin"
-_icon = None
-for cand in ("assets/imbabot.icns", "assets/imbabot.ico"):
-    if os.path.exists(cand):
-        _icon = cand
-        break
+# Platform-correct icon format: macOS EXE/.app uses .icns, Windows .exe uses .ico.
+if _is_mac:
+    _icon = "assets/imbabot.icns" if os.path.exists("assets/imbabot.icns") else None
+else:
+    _icon = "assets/imbabot.ico" if os.path.exists("assets/imbabot.ico") else None
 
 a = Analysis(
     ["run.py"],
