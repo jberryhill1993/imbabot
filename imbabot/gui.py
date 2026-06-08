@@ -31,22 +31,25 @@ from .config import Settings, load_api_key, store_api_key, log_path
 from .logbus import Logger
 from .models import Account
 
-# ---- palette (GitHub-dark inspired) ----
-BG = "#0d1117"
-SURFACE = "#161b22"
-CARD = "#1b2330"
-ELEV = "#222b3a"
-BORDER = "#30363d"
-FG = "#e6edf3"
-MUTED = "#8b949e"
-ACCENT = "#388bfd"
-ACCENT_H = "#4c9bff"
-GREEN = "#2ea043"
-GREEN_H = "#3fb950"
-RED = "#da3633"
-RED_H = "#f85149"
-AMBER = "#bb8009"
-AMBER_H = "#d29922"
+# ---- palette (arc-reactor / Jarvis HUD: cyan glow on near-black) ----
+BG = "#03070d"
+SURFACE = "#06121b"
+CARD = "#081a26"
+ELEV = "#0c2735"
+BORDER = "#0f3c4d"
+FG = "#bfeffb"
+MUTED = "#3f8197"
+ACCENT = "#00e5ff"
+ACCENT_H = "#62f1ff"
+GREEN = "#00e6a0"
+GREEN_H = "#43ffc4"
+RED = "#ff3b54"
+RED_H = "#ff6f82"
+AMBER = "#ffb02e"
+AMBER_H = "#ffc861"
+# extra HUD tones
+GLOW = "#0a6f86"     # dim cyan for glow underlays
+GRID = "#0a2330"     # faint grid / backdrop lines
 
 FONT = "Segoe UI" if sys.platform.startswith("win") else ("Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans")
 MONO = "Consolas" if sys.platform.startswith("win") else ("Menlo" if sys.platform == "darwin" else "DejaVu Sans Mono")
@@ -62,6 +65,163 @@ DISCLAIMER = (
     "to trade.\n\n"
     "Click OK to accept, or Cancel to exit."
 )
+
+
+class _HudField:
+    """Adapter so existing ``lbl.configure(text=…)`` calls drive a HUD canvas
+    readout instead of a ttk Label — keeps the rest of the GUI code unchanged."""
+
+    def __init__(self, hud: "HudHero", key: str) -> None:
+        self._hud = hud
+        self._key = key
+
+    def configure(self, text: Optional[str] = None, **_kw) -> None:
+        if text is not None:
+            self._hud.set_text(self._key, text)
+
+    config = configure
+
+    def cget(self, opt: str):
+        return self._hud.values.get(self._key, "") if opt == "text" else ""
+
+
+class HudHero(tk.Canvas):
+    """Animated arc-reactor HUD: a rotating countdown gauge in the centre with
+    bracketed readout cells (next fire / last price / overnight range) to the
+    right. Pure Tk Canvas — no images, no external assets."""
+
+    def __init__(self, parent, height: int = 280) -> None:
+        super().__init__(parent, height=height, background=BG,
+                         highlightthickness=0, bd=0)
+        self.values = {"count": "00:00:00", "fire": "—", "price": "—", "range": "—"}
+        self._items: dict = {}
+        self._angle = 0.0
+        self._h = height
+        self.bind("<Configure>", lambda _e: self._draw_static())
+        self.after(16, self._draw_static)
+
+    # ---- public API ----
+    def field(self, key: str) -> _HudField:
+        return _HudField(self, key)
+
+    def set_text(self, key: str, text: str) -> None:
+        self.values[key] = text
+        item = self._items.get(key)
+        if item is not None:
+            try:
+                self.itemconfigure(item, text=text)
+            except tk.TclError:
+                pass
+
+    def animate(self, angle: float) -> None:
+        self._angle = angle
+        self._draw_rot(angle)
+
+    # ---- geometry ----
+    def _geo(self):
+        w = self.winfo_width()
+        if w <= 1:
+            w = 960
+        h = self._h
+        cx = 168
+        cy = h // 2
+        R = min(116, cy - 16)
+        return w, h, cx, cy, R
+
+    # ---- drawing ----
+    def _brackets(self, x0, y0, x1, y1, L, col, tag, width=1):
+        c = self.create_line
+        for (ax, ay, bx, by) in (
+            (x0, y0, x0 + L, y0), (x0, y0, x0, y0 + L),
+            (x1, y0, x1 - L, y0), (x1, y0, x1, y0 + L),
+            (x0, y1, x0 + L, y1), (x0, y1, x0, y1 - L),
+            (x1, y1, x1 - L, y1), (x1, y1, x1, y1 - L),
+        ):
+            c(ax, ay, bx, by, fill=col, tags=tag, width=width)
+
+    def _draw_static(self) -> None:
+        import math
+        self.delete("static")
+        w, h, cx, cy, R = self._geo()
+
+        # outer frame corner brackets + faint vertical grid backdrop
+        self._brackets(5, 5, w - 5, h - 5, 24, BORDER, "static")
+        for gx in range(60, w - 30, 90):
+            self.create_line(gx, 10, gx, h - 10, fill=GRID, tags="static")
+
+        # gauge concentric rings
+        for rr, col, wd in ((R, GLOW, 6), (R, ACCENT, 2), (R - 12, BORDER, 1),
+                            (R - 50, BORDER, 1)):
+            self.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, outline=col,
+                             width=wd, tags="static")
+        # tick ring
+        for i in range(60):
+            a = math.radians(i * 6)
+            r1 = R - 4
+            r2 = R - (14 if i % 5 == 0 else 8)
+            self.create_line(cx + r1 * math.cos(a), cy + r1 * math.sin(a),
+                             cx + r2 * math.cos(a), cy + r2 * math.sin(a),
+                             fill=(ACCENT if i % 5 == 0 else BORDER), tags="static")
+
+        # centre readout (countdown)
+        self.create_text(cx, cy - 48, text="T — MINUS", fill=MUTED,
+                         font=(MONO, 9, "bold"), tags="static")
+        self._items["count"] = self.create_text(
+            cx, cy - 6, text=self.values["count"], fill=ACCENT_H,
+            font=(MONO, 31, "bold"), tags="static")
+        self.create_text(cx, cy + 32, text="TO MARKET OPEN", fill=MUTED,
+                         font=(MONO, 8), tags="static")
+
+        # right-hand readout cells
+        x0 = cx + R + 46
+        x1 = w - 18
+        pad = 10
+        gap = 8
+        cellh = (h - 2 * pad - 2 * gap) / 3
+        for idx, (key, lab) in enumerate(
+                (("fire", "NEXT FIRE"), ("price", "LAST PRICE"),
+                 ("range", "OVERNIGHT RANGE"))):
+            ty = pad + idx * (cellh + gap)
+            self._brackets(x0, ty, x1, ty + cellh, 16, BORDER, "static")
+            self.create_line(x0, ty + 1, x0 + 4, ty + 1, fill=ACCENT, width=3, tags="static")
+            self.create_text(x0 + 18, ty + 18, text=lab, anchor="w", fill=MUTED,
+                             font=(MONO, 9, "bold"), tags="static")
+            self._items[key] = self.create_text(
+                x0 + 18, ty + cellh - 17, text=self.values[key], anchor="w",
+                fill=FG, font=(MONO, 18, "bold"), tags="static")
+
+        self._draw_rot(self._angle)
+
+    def _draw_rot(self, angle: float) -> None:
+        import math
+        self.delete("rot")
+        w, h, cx, cy, R = self._geo()
+
+        # outer rotating dashed arc (glow underlay + bright)
+        rr = R + 9
+        for k in range(6):
+            start = angle + k * 60
+            self.create_arc(cx - rr, cy - rr, cx + rr, cy + rr, start=start,
+                            extent=34, style="arc", outline=GLOW, width=6, tags="rot")
+            self.create_arc(cx - rr, cy - rr, cx + rr, cy + rr, start=start,
+                            extent=34, style="arc", outline=ACCENT, width=2, tags="rot")
+        # counter-rotating inner arcs
+        rr2 = R - 26
+        for k in range(3):
+            start = -angle * 1.6 + k * 120
+            self.create_arc(cx - rr2, cy - rr2, cx + rr2, cy + rr2, start=start,
+                            extent=50, style="arc", outline=GREEN_H, width=2, tags="rot")
+        # sweeping reticle
+        a = math.radians(angle * 2)
+        rs = R - 30
+        self.create_line(cx, cy, cx + rs * math.cos(a), cy + rs * math.sin(a),
+                         fill=ACCENT, width=1, tags="rot")
+        # orbiting node on the outer ring
+        ao = math.radians(-angle * 2.4)
+        ro = R + 9
+        nx, ny = cx + ro * math.cos(ao), cy + ro * math.sin(ao)
+        self.create_oval(nx - 3, ny - 3, nx + 3, ny + 3, fill=ACCENT_H,
+                         outline="", tags="rot")
 
 
 class ImbabotGUI:
@@ -165,12 +325,12 @@ class ImbabotGUI:
                            ("Pill.Bad.TLabel", RED, "#ffffff"), ("Pill.Warn.TLabel", AMBER, "#0d1117")):
             st.configure(nm, background=bg, foreground=fg, font=(FONT, 9, "bold"), padding=(11, 5))
         # inputs
-        st.configure("TEntry", fieldbackground="#0b0e14", foreground=FG, insertcolor=FG,
+        st.configure("TEntry", fieldbackground="#06141d", foreground=FG, insertcolor=FG,
                      bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=6)
         st.map("TEntry", bordercolor=[("focus", ACCENT)])
-        st.configure("TCombobox", fieldbackground="#0b0e14", background=SURFACE, foreground=FG,
+        st.configure("TCombobox", fieldbackground="#06141d", background=SURFACE, foreground=FG,
                      arrowcolor=MUTED, bordercolor=BORDER, padding=5)
-        st.map("TCombobox", fieldbackground=[("readonly", "#0b0e14")], foreground=[("readonly", FG)])
+        st.map("TCombobox", fieldbackground=[("readonly", "#06141d")], foreground=[("readonly", FG)])
         st.configure("TCheckbutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
         st.map("TCheckbutton", background=[("active", BG)], indicatorcolor=[("selected", ACCENT)])
         st.configure("TRadiobutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
@@ -256,13 +416,15 @@ class ImbabotGUI:
         self.badge_armed.pack(side="left", padx=4)
         ttk.Separator(root).pack(fill="x", padx=20)
 
-        # ===== hero dashboard =====
-        dash = ttk.Frame(root, style="TFrame", padding=(20, 16))
-        dash.pack(fill="x")
-        self.lbl_count = self._stat(dash, "Countdown to fire", 0, big=True)
-        self.lbl_fire = self._stat(dash, "Next fire", 1)
-        self.lbl_price = self._stat(dash, "Last price", 2)
-        self.lbl_range = self._stat(dash, "Overnight range", 3)
+        # ===== hero HUD (animated arc-reactor gauge) =====
+        self.hud = HudHero(root, height=280)
+        self.hud.pack(fill="x", padx=20, pady=(12, 4))
+        self.lbl_count = self.hud.field("count")
+        self.lbl_fire = self.hud.field("fire")
+        self.lbl_price = self.hud.field("price")
+        self.lbl_range = self.hud.field("range")
+        self._hud_angle = 0.0
+        self.root.after(60, self._hud_animate)
 
         # ===== control bar =====
         ctrl = ttk.Frame(root, style="TFrame", padding=(20, 2))
@@ -290,7 +452,7 @@ class ImbabotGUI:
                   font=(FONT, 9, "bold")).pack(side="left")
         ttk.Button(topbar, text="Save log…", command=self._on_save_log, style="Ghost.TButton").pack(side="right")
         self.txt = tk.Text(logwrap, height=9, wrap="word", relief="flat", borderwidth=0,
-                           background="#0b0e14", foreground=FG, insertbackground=FG,
+                           background="#06141d", foreground=FG, insertbackground=FG,
                            font=(MONO, 10), padx=12, pady=10, highlightthickness=0)
         self.txt.grid(row=1, column=0, sticky="nsew")
         sb = ttk.Scrollbar(logwrap, command=self.txt.yview)
@@ -788,6 +950,16 @@ class ImbabotGUI:
         except Exception:
             pass
         self.root.after(1000, self._tick_countdown)
+
+    def _hud_animate(self) -> None:
+        if not self.root.winfo_exists():
+            return
+        self._hud_angle = (self._hud_angle + 2.2) % 360
+        try:
+            self.hud.animate(self._hud_angle)
+        except Exception:
+            pass
+        self.root.after(60, self._hud_animate)
 
     def _start_ticker(self) -> None:
         self._tick_stop.clear()
