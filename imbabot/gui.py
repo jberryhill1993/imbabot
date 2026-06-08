@@ -74,6 +74,7 @@ class ImbabotGUI:
         self.controller = None   # browser backend controller, created on launch
         self.accounts: List[Account] = []
         self._poll_stop = threading.Event()
+        self._tick_stop = threading.Event()
 
         root.title(f"Imbabot {__version__}")
         root.configure(bg=BG)
@@ -94,6 +95,8 @@ class ImbabotGUI:
         self.root.after(150, self._drain_events)
         self.root.after(1000, self._tick_countdown)
         self.log(f"Imbabot {__version__} ready. Config: {log_path().parent}")
+        if shot_path is None:
+            self._start_ticker()
 
         if shot_path:  # self-portrait mode (skips disclaimer, captures, quits)
             self._demo_fill()
@@ -151,6 +154,12 @@ class ImbabotGUI:
         st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(FONT, 18, "bold"))
         st.configure("CardBig.TLabel", background=CARD, foreground=ACCENT, font=(FONT, 34, "bold"))
         st.configure("Banner.TLabel", background=BG, foreground=MUTED, font=(FONT, 11, "bold"))
+        # header live ticker (NQ)
+        st.configure("TickSym.TLabel", background=ELEV, foreground=FG, font=(FONT, 10, "bold"), padding=(9, 4))
+        st.configure("TickPrice.TLabel", background=BG, foreground=FG, font=(MONO, 15, "bold"))
+        st.configure("TickUp.TLabel", background=BG, foreground=GREEN_H, font=(FONT, 10, "bold"))
+        st.configure("TickDown.TLabel", background=BG, foreground=RED_H, font=(FONT, 10, "bold"))
+        st.configure("TickFlat.TLabel", background=BG, foreground=MUTED, font=(FONT, 10, "bold"))
         # pills
         for nm, bg, fg in (("Pill.Sec.TLabel", ELEV, MUTED), ("Pill.Ok.TLabel", GREEN, "#ffffff"),
                            ("Pill.Bad.TLabel", RED, "#ffffff"), ("Pill.Warn.TLabel", AMBER, "#0d1117")):
@@ -228,6 +237,15 @@ class ImbabotGUI:
         ttk.Label(left, text="◆ IMBABOT", style="Brand.TLabel").pack(side="left")
         ttk.Label(left, text=f"   v{__version__}  ·  TopstepX opening-range bot",
                   style="Sub.TLabel").pack(side="left", pady=(8, 0))
+        # live NQ ticker — fed by a public quote feed, independent of the API login
+        tick = ttk.Frame(header, style="Header.TFrame")
+        tick.pack(side="left", padx=(32, 0))
+        self.lbl_tick_sym = ttk.Label(tick, text="NQ", style="TickSym.TLabel")
+        self.lbl_tick_sym.pack(side="left")
+        self.lbl_tick_price = ttk.Label(tick, text="—", style="TickPrice.TLabel")
+        self.lbl_tick_price.pack(side="left", padx=(9, 7))
+        self.lbl_tick_chg = ttk.Label(tick, text="connecting…", style="TickFlat.TLabel")
+        self.lbl_tick_chg.pack(side="left", pady=(3, 0))
         badges = ttk.Frame(header, style="Header.TFrame")
         badges.pack(side="right")
         self.badge_conn = self._pill(badges, "Offline", "Sec")
@@ -719,6 +737,8 @@ class ImbabotGUI:
             price, rng = evt[1], evt[2]
             self.lbl_price.configure(text=f"{price:g}" if price is not None else "—")
             self.lbl_range.configure(text=f"{rng['low']:g}–{rng['high']:g}" if rng else "—")
+        elif kind == "ticker":
+            self._update_ticker(evt[1])
         elif kind == "error":
             self.log(evt[1], "error")
 
@@ -769,6 +789,30 @@ class ImbabotGUI:
             pass
         self.root.after(1000, self._tick_countdown)
 
+    def _start_ticker(self) -> None:
+        self._tick_stop.clear()
+        threading.Thread(target=self._ticker_worker, name="Ticker", daemon=True).start()
+
+    def _ticker_worker(self) -> None:
+        from .ticker import fetch_quote, DEFAULT_TICKER_SYMBOL
+
+        while not self._tick_stop.is_set():
+            quote = fetch_quote(DEFAULT_TICKER_SYMBOL)
+            self.events.put(("ticker", quote))
+            self._tick_stop.wait(5.0)
+
+    def _update_ticker(self, q) -> None:
+        if q is None:
+            if self.lbl_tick_price.cget("text") == "—":
+                self.lbl_tick_chg.configure(text="no feed", style="TickFlat.TLabel")
+            return
+        self.lbl_tick_sym.configure(text=q.symbol)
+        self.lbl_tick_price.configure(text=f"{q.price:,.2f}")
+        chg, pct = q.change, q.change_pct
+        arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "■")
+        style = "TickUp.TLabel" if chg > 0 else ("TickDown.TLabel" if chg < 0 else "TickFlat.TLabel")
+        self.lbl_tick_chg.configure(text=f"{arrow} {chg:+,.2f} ({pct:+.2f}%)", style=style)
+
     def _start_poller(self) -> None:
         self._poll_stop.clear()
         threading.Thread(target=self._poll_worker, daemon=True).start()
@@ -786,6 +830,7 @@ class ImbabotGUI:
 
     def on_close(self) -> None:
         self._poll_stop.set()
+        self._tick_stop.set()
         if self.engine and self.engine.armed:
             self.engine.disarm()
         if self.controller is not None:
