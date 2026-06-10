@@ -241,7 +241,19 @@ class ProjectXClient:
     def place_straddle_leg(
         self, account_id: int, contract_id: str, leg: StraddleLeg
     ) -> OrderResult:
-        """Place one straddle leg as a STOP entry with attached brackets."""
+        """Place one straddle leg as a STOP entry with attached brackets.
+
+        Bracket ticks are SIGNED offsets from the fill price (+above / -below),
+        so a long's stop-loss is negative and its target positive; a short is
+        mirrored. (Live-verified 2026-06-09: unsigned ticks are rejected with
+        "Ticks should be less than zero when longing.")
+        """
+        if leg.side == OrderSide.BUY:
+            sl_ticks = -leg.stop_loss_ticks
+            tp_ticks = leg.take_profit_ticks
+        else:
+            sl_ticks = leg.stop_loss_ticks
+            tp_ticks = -leg.take_profit_ticks
         result = self.place_order(
             account_id=account_id,
             contract_id=contract_id,
@@ -250,8 +262,8 @@ class ProjectXClient:
             size=leg.size,
             stop_price=leg.stop_price,
             custom_tag=leg.custom_tag,
-            stop_loss_ticks=leg.stop_loss_ticks,
-            take_profit_ticks=leg.take_profit_ticks,
+            stop_loss_ticks=sl_ticks,
+            take_profit_ticks=tp_ticks,
         )
         leg.order_id = result.order_id
         return result

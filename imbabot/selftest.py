@@ -117,6 +117,14 @@ def run_selftest() -> int:
     plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
     eng._place_plan(plan)
     _check("placed 2 entry legs", len(fake.placed) == 2, f"placed {len(fake.placed)}")
+    buy_rec = next(o for o in fake.placed if o["side"] == OrderSide.BUY)
+    sell_rec = next(o for o in fake.placed if o["side"] == OrderSide.SELL)
+    _check("long brackets signed (SL<0 / TP>0)",
+           buy_rec["stop_loss_ticks"] < 0 < buy_rec["take_profit_ticks"],
+           f"SL={buy_rec['stop_loss_ticks']} TP={buy_rec['take_profit_ticks']}")
+    _check("short brackets signed (SL>0 / TP<0)",
+           sell_rec["take_profit_ticks"] < 0 < sell_rec["stop_loss_ticks"],
+           f"SL={sell_rec['stop_loss_ticks']} TP={sell_rec['take_profit_ticks']}")
     long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
     _check("both legs have order ids", long_oid is not None and short_oid is not None)
     fake.simulate_fill(eng.contract.id, +2)            # long side fills
