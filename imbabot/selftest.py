@@ -132,18 +132,29 @@ def run_selftest() -> int:
     _check("semi-auto places 2 legs", len(fake.placed) == 2)
     _check("semi-auto cancels nothing", fake.cancelled == [])
 
-    # 6b) incomplete straddle: if the second leg is rejected, the lone first
-    # leg (an unhedged directional stop) must be cancelled and the fire fail
+    # 6b) one-sided straddle: if one leg is rejected, the placed leg is KEPT
+    # (its SL/TP bracket bounds the risk platform-side) and a warning logged
     eng, fake = make_engine(dry_run=False, trade_mode="semi_auto")
     fake.reject_sides = {OrderSide.SELL}
     plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    _check("one-sided: lone long leg kept",
+           plan.long_leg.order_id is not None and plan.long_leg.order_id in fake.orders,
+           f"orders={list(fake.orders)}")
+    _check("one-sided: nothing cancelled", fake.cancelled == [],
+           f"cancelled={fake.cancelled}")
+
+    # 6b2) total placement failure: nothing reached the book -> fire fails loudly
+    eng, fake = make_engine(dry_run=False, trade_mode="semi_auto")
+    fake.reject_sides = {OrderSide.BUY, OrderSide.SELL}
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
     try:
         eng._place_plan(plan)
-        _check("incomplete straddle raises", False, "no error raised")
+        _check("total placement failure raises", False, "no error raised")
     except RuntimeError:
-        _check("incomplete straddle raises", True)
-    _check("lone long entry cancelled", plan.long_leg.order_id in fake.cancelled,
-           f"cancelled={fake.cancelled}")
+        _check("total placement failure raises", True)
+    _check("total failure placed nothing", len(fake.placed) == 0,
+           f"placed={len(fake.placed)}")
 
     # 6c) reference-price capture retries once on a transient failure
     eng, fake = make_engine(dry_run=True)

@@ -278,52 +278,42 @@ class BotEngine:
         acct = self.account.id
         cid = plan.contract.id
         placed: List = []
-        failure: Optional[str] = None
+        failures: List[str] = []
+        # Attempt every leg even if an earlier one fails: each leg carries its
+        # own SL/TP bracket (held server-side by TopstepX and activated on
+        # fill), so a lone leg is a risk-bounded one-direction breakout trade
+        # — worth keeping per the operator's policy.
         for leg in plan.legs:
             try:
                 res = self.client.place_straddle_leg(acct, cid, leg)
             except Exception as exc:
-                failure = f"{leg.side.name} leg failed: {exc}"
-            else:
-                if res.success:
-                    placed.append(leg)
-                    self.log(
-                        f"Placed {leg.side.name} STOP {leg.size}@{leg.stop_price:,.2f} "
-                        f"-> orderId={res.order_id} tag={leg.custom_tag}"
-                    )
-                else:
-                    failure = (
-                        f"{leg.side.name} leg rejected: {res.error_message} "
-                        f"(code {res.error_code})"
-                    )
-            if failure:
-                break
-        if failure is None:
-            self.risk.record_trade()
-            return
-        self.log(f"REJECTED {failure}", "error")
-        # A one-sided straddle is not the strategy: a lone stop entry is an
-        # unhedged directional bet. Cancel any sibling that did get placed.
-        for leg in placed:
-            if leg.order_id is None:
+                failures.append(f"{leg.side.name}: {exc}")
                 continue
-            try:
-                self.client.cancel_order(acct, leg.order_id)
+            if res.success:
+                placed.append(leg)
                 self.log(
-                    f"Cancelled sibling {leg.side.name} entry orderId={leg.order_id} "
-                    "(straddle incomplete).",
-                    "warn",
+                    f"Placed {leg.side.name} STOP {leg.size}@{leg.stop_price:,.2f} "
+                    f"-> orderId={res.order_id} tag={leg.custom_tag}"
                 )
-            except Exception as exc:
-                self.log(
-                    f"FAILED to cancel sibling {leg.side.name} entry "
-                    f"orderId={leg.order_id}: {exc} — manage it manually NOW.",
-                    "error",
+            else:
+                failures.append(
+                    f"{leg.side.name}: {res.error_message} (code {res.error_code})"
                 )
-        if placed:
-            # real exposure existed briefly; count it against the daily guard
-            self.risk.record_trade()
-        raise RuntimeError(f"straddle incomplete — {failure}")
+        if not placed:
+            raise RuntimeError("no orders placed — " + "; ".join(failures))
+        if failures:
+            self.log("REJECTED " + "; ".join(failures), "error")
+            kept = ", ".join(
+                f"{leg.side.name} STOP @ {leg.stop_price:,.2f} (orderId={leg.order_id})"
+                for leg in placed
+            )
+            self.log(
+                f"Straddle is ONE-SIDED: keeping {kept}. Its SL/TP bracket is "
+                "active on the platform; cancel manually if you don't want the "
+                "one-direction trade.",
+                "warn",
+            )
+        self.risk.record_trade()
 
     # -------------------------------------------------------------- monitor
     def _start_monitor(self, plan: StraddlePlan) -> None:
