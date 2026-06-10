@@ -897,8 +897,8 @@ class ImbabotGUI:
             self.lbl_contract.configure(text=evt[1])
         elif kind == "dashboard":
             price, rng = evt[1], evt[2]
-            self.lbl_price.configure(text=f"{price:g}" if price is not None else "—")
-            self.lbl_range.configure(text=f"{rng['low']:g}–{rng['high']:g}" if rng else "—")
+            self.lbl_price.configure(text=f"{price:,.2f}" if price is not None else "—")
+            self.lbl_range.configure(text=f"{rng['low']:,.1f}–{rng['high']:,.1f}" if rng else "—")
         elif kind == "ticker":
             self._update_ticker(evt[1])
         elif kind == "error":

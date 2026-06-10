@@ -93,9 +93,9 @@ def describe_plan(plan: StraddlePlan) -> str:
     L, S = plan.long_leg, plan.short_leg
     return (
         f"Straddle on {c.name} ({c.id})\n"
-        f"  reference price : {plan.reference_price:g}\n"
-        f"  LONG  : BUY  STOP {L.size} @ {L.stop_price:g}  "
+        f"  reference price : {plan.reference_price:,.2f}\n"
+        f"  LONG  : BUY  STOP {L.size} @ {L.stop_price:,.2f}  "
         f"(SL {L.stop_loss_ticks}t / TP {L.take_profit_ticks}t)\n"
-        f"  SHORT : SELL STOP {S.size} @ {S.stop_price:g}  "
+        f"  SHORT : SELL STOP {S.size} @ {S.stop_price:,.2f}  "
         f"(SL {S.stop_loss_ticks}t / TP {S.take_profit_ticks}t)"
     )

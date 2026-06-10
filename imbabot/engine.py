@@ -217,7 +217,7 @@ class BotEngine:
         try:
             self.log("FIRE — capturing reference price.")
             ref = self.client.last_price(self.contract.id, live=self.settings.use_live_data)
-            self.log(f"Reference price captured: {ref:g}")
+            self.log(f"Reference price captured: {ref:,.2f}")
 
             tag = "imbabot-" + datetime.now().strftime("%Y%m%d-%H%M%S")
             plan = build_straddle(self.contract, ref, self.strategy_params(), tag_prefix=tag)
@@ -242,7 +242,7 @@ class BotEngine:
             res = self.client.place_straddle_leg(acct, cid, leg)
             if res.success:
                 self.log(
-                    f"Placed {leg.side.name} STOP {leg.size}@{leg.stop_price:g} "
+                    f"Placed {leg.side.name} STOP {leg.size}@{leg.stop_price:,.2f} "
                     f"-> orderId={res.order_id} tag={leg.custom_tag}"
                 )
             else:
