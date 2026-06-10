@@ -435,6 +435,8 @@ class ImbabotGUI:
         self.lbl_mode_banner.pack(side="left", padx=18)
         self.btn_panic = ttk.Button(ctrl, text="■  EMERGENCY STOP", command=self._on_panic, style="Danger.TButton")
         self.btn_panic.pack(side="right")
+        self.btn_flatten = ttk.Button(ctrl, text="▽  FLATTEN", command=self._on_flatten, style="Warning.TButton")
+        self.btn_flatten.pack(side="right", padx=(0, 10))
 
         # ===== settings notebook =====
         nb = ttk.Notebook(root)
@@ -813,6 +815,25 @@ class ImbabotGUI:
             return
         self.btn_arm.configure(text="ARM", style="Success.TButton")
         threading.Thread(target=self.engine.emergency_stop, daemon=True).start()
+
+    def _on_flatten(self) -> None:
+        if not messagebox.askyesno(
+            "Flatten all positions",
+            "Close ALL open positions with market orders now?\n\n"
+            "Working orders are left alone (use Emergency Stop to also cancel those).",
+            icon="warning", default="no",
+        ):
+            return
+        if self.var_backend.get() == "browser":
+            if self.controller is None:
+                messagebox.showinfo("Launch first", "Launch the browser before flattening.")
+                return
+            self.controller.flatten()
+            return
+        if not self.engine:
+            messagebox.showinfo("Connect first", "Connect before flattening.")
+            return
+        threading.Thread(target=self.engine.flatten_all, daemon=True).start()
 
     def _on_test_toggle(self) -> None:
         if self.var_test_mode.get():

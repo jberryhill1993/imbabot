@@ -207,5 +207,18 @@ def run_selftest() -> int:
     _check("flatten is opposite side (SELL of long)",
            bool(flatten) and int(flatten[0]["side"]) == int(OrderSide.SELL))
 
+    # 9) flatten_all closes positions but leaves working orders untouched
+    eng, fake = make_engine(dry_run=False, trade_mode="semi_auto")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    fake.simulate_fill(eng.contract.id, +2)
+    before = len(fake.placed)
+    eng.flatten_all()
+    flat = [o for o in fake.placed[before:] if o.get("custom_tag", "").startswith("imbabot-flatten")]
+    _check("flatten_all sent a market close", len(flat) == 1 and int(flat[0]["side"]) == int(OrderSide.SELL),
+           f"flat={flat}")
+    _check("flatten_all left working orders alone", fake.cancelled == [],
+           f"cancelled={fake.cancelled}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

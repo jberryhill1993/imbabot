@@ -376,7 +376,29 @@ class BotEngine:
         except Exception as exc:
             self.log(f"session refresh failed during panic: {exc} — attempting anyway.", "warn")
         acct = self.account.id
-        # 1) cancel working orders
+        self._cancel_all_orders(acct)
+        self._flatten_positions(acct)
+        self.log("Emergency stop complete.")
+
+    def flatten_all(self) -> None:
+        """Close every open position with a market order.
+
+        Unlike emergency_stop this leaves working orders alone — it only takes
+        you flat. Useful after a test fill or to exit at end of session while
+        keeping (or separately managing) resting entries.
+        """
+        self.log("FLATTEN ALL positions requested.", "warn")
+        if not self.account:
+            self.log("No account bound; nothing to flatten.", "warn")
+            return
+        try:
+            self._ensure_session()
+        except Exception as exc:
+            self.log(f"session refresh failed during flatten: {exc} — attempting anyway.", "warn")
+        self._flatten_positions(self.account.id)
+        self.log("Flatten complete.")
+
+    def _cancel_all_orders(self, acct: int) -> None:
         try:
             for o in self.client.search_open_orders(acct):
                 oid = _order_id(o)
@@ -388,7 +410,8 @@ class BotEngine:
                         self.log(f"Cancel {oid} failed: {exc}", "error")
         except Exception as exc:
             self.log(f"Order sweep failed: {exc}", "error")
-        # 2) flatten positions with market orders
+
+    def _flatten_positions(self, acct: int) -> None:
         try:
             for p in self.client.search_open_positions(acct):
                 cid = p.get("contractId") or p.get("contract_id")
@@ -407,7 +430,6 @@ class BotEngine:
                     self.log(f"Flatten {cid} failed: {exc}", "error")
         except Exception as exc:
             self.log(f"Position sweep failed: {exc}", "error")
-        self.log("Emergency stop complete.")
 
 
 # ----------------------------------------------------------- field helpers

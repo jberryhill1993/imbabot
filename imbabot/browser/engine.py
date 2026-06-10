@@ -129,6 +129,15 @@ class BrowserEngine:
         except AdapterError as exc:
             self.log(f"flatten failed: {exc}", "error")
 
+    def flatten_only(self, page: Any) -> None:
+        """Close all positions; leave working orders alone."""
+        self.log("FLATTEN ALL positions.", "warn")
+        try:
+            self.adapter.flatten_all(page)
+            self.log("Flatten sent.")
+        except AdapterError as exc:
+            self.log(f"flatten failed: {exc}", "error")
+
 
 class BrowserController:
     """Owns Playwright on a dedicated thread; drives BrowserEngine by command."""
@@ -167,6 +176,10 @@ class BrowserController:
 
     def panic(self) -> None:
         self._cmds.put("panic")
+
+    def flatten(self) -> None:
+        """Close all positions; working orders stay."""
+        self._cmds.put("flatten")
 
     def fire_now(self) -> None:
         """Place the straddle immediately (Test section's 'Fire now')."""
@@ -237,6 +250,8 @@ class BrowserController:
                 elif cmd == "panic":
                     self.engine.emergency_stop(page)
                     self.state = "idle"
+                elif cmd == "flatten":
+                    self.engine.flatten_only(page)
                 elif cmd == "fire_now":
                     self.log(f"[{self.adapter.name}] Manual TEST fire — placing now.")
                     handles, plan, placed = self.engine.fire_open(page)
