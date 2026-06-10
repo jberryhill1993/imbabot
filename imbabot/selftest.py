@@ -132,6 +132,35 @@ def run_selftest() -> int:
     _check("semi-auto places 2 legs", len(fake.placed) == 2)
     _check("semi-auto cancels nothing", fake.cancelled == [])
 
+    # 6b) incomplete straddle: if the second leg is rejected, the lone first
+    # leg (an unhedged directional stop) must be cancelled and the fire fail
+    eng, fake = make_engine(dry_run=False, trade_mode="semi_auto")
+    fake.reject_sides = {OrderSide.SELL}
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    try:
+        eng._place_plan(plan)
+        _check("incomplete straddle raises", False, "no error raised")
+    except RuntimeError:
+        _check("incomplete straddle raises", True)
+    _check("lone long entry cancelled", plan.long_leg.order_id in fake.cancelled,
+           f"cancelled={fake.cancelled}")
+
+    # 6c) reference-price capture retries once on a transient failure
+    eng, fake = make_engine(dry_run=True)
+    calls = {"n": 0}
+    orig_lp = fake.last_price
+
+    def flaky(cid, live=False):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient data hiccup")
+        return orig_lp(cid, live=live)
+
+    fake.last_price = flaky
+    ref = eng._capture_reference_price()
+    _check("price capture retries transient failure",
+           ref == 21000.0 and calls["n"] == 2, f"ref={ref} calls={calls['n']}")
+
     # 7) risk guard blocks oversize / dry-run send
     eng, fake = make_engine(dry_run=True, contracts=10, max_contracts=5)
     try:

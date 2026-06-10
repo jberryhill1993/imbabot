@@ -213,10 +213,49 @@ class BotEngine:
         self.log("Disarmed.")
 
     # ---------------------------------------------------------------- fire
+    def _ensure_session(self) -> None:
+        """Re-validate the token right before it matters; re-auth if stale.
+
+        Tokens last ~24h, so an app left connected overnight can hold a dead
+        token at 09:29:57. Clients without validate() (the test fake) are
+        assumed fresh.
+        """
+        validate = getattr(self.client, "validate", None)
+        if validate is None:
+            return
+        try:
+            if validate():
+                return
+        except Exception:
+            pass
+        from .config import load_api_key
+
+        key = load_api_key(self.settings.username)
+        if not key:
+            raise RuntimeError(
+                "Session token expired and no stored API key to re-authenticate."
+            )
+        self.client.authenticate(self.settings.username, key)
+        self.log("Session token was stale — re-authenticated.", "warn")
+
+    def _capture_reference_price(self, attempts: int = 2) -> float:
+        """Capture the reference price, retrying once on a transient failure."""
+        last_exc: Optional[Exception] = None
+        for i in range(1, attempts + 1):
+            try:
+                return self.client.last_price(
+                    self.contract.id, live=self.settings.use_live_data
+                )
+            except Exception as exc:
+                last_exc = exc
+                self.log(f"price capture attempt {i}/{attempts} failed: {exc}", "warn")
+        raise RuntimeError(f"could not capture reference price: {last_exc}")
+
     def _on_fire(self) -> None:
         try:
+            self._ensure_session()
             self.log("FIRE — capturing reference price.")
-            ref = self.client.last_price(self.contract.id, live=self.settings.use_live_data)
+            ref = self._capture_reference_price()
             self.log(f"Reference price captured: {ref:,.2f}")
 
             tag = "imbabot-" + datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -238,20 +277,53 @@ class BotEngine:
         self.risk.check_can_send_orders()
         acct = self.account.id
         cid = plan.contract.id
+        placed: List = []
+        failure: Optional[str] = None
         for leg in plan.legs:
-            res = self.client.place_straddle_leg(acct, cid, leg)
-            if res.success:
-                self.log(
-                    f"Placed {leg.side.name} STOP {leg.size}@{leg.stop_price:,.2f} "
-                    f"-> orderId={res.order_id} tag={leg.custom_tag}"
-                )
+            try:
+                res = self.client.place_straddle_leg(acct, cid, leg)
+            except Exception as exc:
+                failure = f"{leg.side.name} leg failed: {exc}"
             else:
+                if res.success:
+                    placed.append(leg)
+                    self.log(
+                        f"Placed {leg.side.name} STOP {leg.size}@{leg.stop_price:,.2f} "
+                        f"-> orderId={res.order_id} tag={leg.custom_tag}"
+                    )
+                else:
+                    failure = (
+                        f"{leg.side.name} leg rejected: {res.error_message} "
+                        f"(code {res.error_code})"
+                    )
+            if failure:
+                break
+        if failure is None:
+            self.risk.record_trade()
+            return
+        self.log(f"REJECTED {failure}", "error")
+        # A one-sided straddle is not the strategy: a lone stop entry is an
+        # unhedged directional bet. Cancel any sibling that did get placed.
+        for leg in placed:
+            if leg.order_id is None:
+                continue
+            try:
+                self.client.cancel_order(acct, leg.order_id)
                 self.log(
-                    f"REJECTED {leg.side.name} leg: {res.error_message} "
-                    f"(code {res.error_code})",
+                    f"Cancelled sibling {leg.side.name} entry orderId={leg.order_id} "
+                    "(straddle incomplete).",
+                    "warn",
+                )
+            except Exception as exc:
+                self.log(
+                    f"FAILED to cancel sibling {leg.side.name} entry "
+                    f"orderId={leg.order_id}: {exc} — manage it manually NOW.",
                     "error",
                 )
-        self.risk.record_trade()
+        if placed:
+            # real exposure existed briefly; count it against the daily guard
+            self.risk.record_trade()
+        raise RuntimeError(f"straddle incomplete — {failure}")
 
     # -------------------------------------------------------------- monitor
     def _start_monitor(self, plan: StraddlePlan) -> None:
@@ -309,6 +381,10 @@ class BotEngine:
         if not self.account:
             self.log("No account bound; nothing to flatten.", "warn")
             return
+        try:
+            self._ensure_session()
+        except Exception as exc:
+            self.log(f"session refresh failed during panic: {exc} — attempting anyway.", "warn")
         acct = self.account.id
         # 1) cancel working orders
         try:

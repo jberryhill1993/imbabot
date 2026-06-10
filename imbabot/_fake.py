@@ -24,6 +24,7 @@ class FakeClient:
         self.positions: List[Dict[str, Any]] = []
         self._lock = threading.Lock()
         self.authenticated = False
+        self.reject_sides: set = set()  # OrderSides whose entry placement is rejected
 
     # --- auth / account / contract ---
     def authenticate(self, username: str, api_key: str) -> str:
@@ -63,6 +64,9 @@ class FakeClient:
         return OrderResult(order_id=oid, success=True, error_code=0, error_message=None)
 
     def place_straddle_leg(self, account_id: int, contract_id: str, leg: StraddleLeg) -> OrderResult:
+        if leg.side in self.reject_sides:
+            return OrderResult(order_id=None, success=False, error_code=99,
+                               error_message="rejected (fake)")
         res = self.place_order(
             account_id=account_id, contract_id=contract_id,
             order_type=OrderType.STOP, side=leg.side, size=leg.size,
