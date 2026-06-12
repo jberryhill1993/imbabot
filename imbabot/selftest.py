@@ -133,6 +133,23 @@ def run_selftest() -> int:
            f"cancelled={fake.cancelled}")
     _check("filled (long) entry NOT cancelled", long_oid not in fake.cancelled)
 
+    # 5b) mirror image: short fill cancels the long entry
+    eng, fake = make_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
+    fake.simulate_fill(eng.contract.id, -2)            # short side fills
+    eng._monitor_oco(plan, poll_seconds=0.01)
+    _check("opposite (long) entry cancelled on short fill", long_oid in fake.cancelled,
+           f"cancelled={fake.cancelled}")
+    _check("filled (short) entry NOT cancelled", short_oid not in fake.cancelled)
+
+    # 5c) ProjectX position payload decoding (type: 1=Long, 2=Short, unsigned size)
+    from .engine import _net_position_value
+    _check("position type 1 (Long) -> +size", _net_position_value({"type": 1, "size": 3}) == 3)
+    _check("position type 2 (Short) -> -size", _net_position_value({"type": 2, "size": 3}) == -3)
+    _check("legacy signed netPos passthrough", _net_position_value({"netPos": -2}) == -2)
+
     # 6) semi-auto: both placed, no monitor/cancel
     eng, fake = make_engine(dry_run=False, trade_mode="semi_auto")
     plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")

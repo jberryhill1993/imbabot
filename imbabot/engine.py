@@ -324,11 +324,14 @@ class BotEngine:
         self._monitor_thread.start()
 
     def _monitor_oco(self, plan: StraddlePlan, poll_seconds: float = 1.0) -> None:
-        """One-Trade OCO: when one entry fills, cancel the opposite entry.
+        """One-Trade OCO: when one entry fills, cancel the remaining entries.
 
-        We only cancel the opposite leg on a confirmed *fill* (a non-flat position
-        on our contract), not on an external cancel. The per-leg brackets bound
-        risk regardless, so a both-sides whipsaw is contained.
+        We only act on a confirmed *fill* (a non-flat position on our
+        contract), not on an external cancel. Rather than inferring which side
+        filled from the position's direction, we cancel every plan entry that
+        is still OPEN in the book — the filled leg is no longer open, so this
+        is correct even if the position payload's direction encoding changes.
+        The per-leg brackets bound risk regardless.
         """
         self.log("OCO monitor started (One-Trade mode).")
         acct = self.account.id
@@ -344,18 +347,26 @@ class BotEngine:
 
             net = _net_position_for(positions, cid)
             if net != 0:
-                filled = plan.long_leg if net > 0 else plan.short_leg
-                other = plan.short_leg if net > 0 else plan.long_leg
                 self.log(
                     f"Fill detected ({'LONG' if net > 0 else 'SHORT'} {abs(net)}). "
-                    f"Cancelling opposite {other.side.name} entry."
+                    "Cancelling any remaining entry legs."
                 )
-                if other.order_id is not None:
+                try:
+                    open_ids = {_order_id(o) for o in self.client.search_open_orders(acct)}
+                except Exception as exc:
+                    self.log(f"order lookup failed: {exc} — attempting cancels blind.", "warn")
+                    open_ids = None
+                for leg in plan.legs:
+                    oid = leg.order_id
+                    if oid is None:
+                        continue
+                    if open_ids is not None and oid not in open_ids:
+                        continue  # this leg filled (or is already gone)
                     try:
-                        self.client.cancel_order(acct, other.order_id)
-                        self.log(f"Cancelled opposite entry orderId={other.order_id}.")
+                        self.client.cancel_order(acct, oid)
+                        self.log(f"Cancelled remaining {leg.side.name} entry orderId={oid}.")
                     except Exception as exc:
-                        self.log(f"Failed to cancel opposite entry: {exc}", "error")
+                        self.log(f"Failed to cancel {leg.side.name} entry {oid}: {exc}", "error")
                 return
             self._monitor_stop.wait(poll_seconds)
         self.log("OCO monitor stopped.")
@@ -442,10 +453,14 @@ def _net_position_value(p: Dict[str, Any]) -> int:
                 val = int(p[key])
             except (TypeError, ValueError):
                 continue
-            # Some feeds encode direction separately (0=long,1=short) with size >= 0
+            # ProjectX PositionType enum: 1 = Long, 2 = Short; size is unsigned.
+            # (Live-verified 2026-06-12 — type 1 was previously misread as
+            # short, inverting the OCO monitor and the flatten direction.)
             t = p.get("type", p.get("side"))
-            if val >= 0 and t in (1, "1", "Short", "SHORT", "sell"):
+            if t in (2, "2", "Short", "SHORT", "Sell", "sell"):
                 return -abs(val)
+            if t in (1, "1", "Long", "LONG", "Buy", "buy"):
+                return abs(val)
             return val
     return 0
 

@@ -97,6 +97,18 @@ class FakeClient:
 
     # --- test helpers ---
     def simulate_fill(self, contract_id: str, net: int) -> None:
-        """Pretend an entry filled: open a position of `net` (>0 long, <0 short)."""
+        """Pretend an entry filled: open a position of `net` (>0 long, <0 short).
+
+        Mirrors the real ProjectX payload (type: 1=Long 2=Short, unsigned size)
+        and removes the filled entry from the open-order book, as live does.
+        """
         with self._lock:
-            self.positions = [{"contractId": contract_id, "netPos": net}]
+            self.positions = [{
+                "contractId": contract_id,
+                "type": 1 if net > 0 else 2,
+                "size": abs(net),
+            }]
+            filled_side = OrderSide.BUY if net > 0 else OrderSide.SELL
+            for oid, rec in list(self.orders.items()):
+                if rec.get("side") == filled_side:
+                    self.orders.pop(oid)
