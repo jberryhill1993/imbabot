@@ -531,7 +531,7 @@ class ImbabotGUI:
         self.var_contracts = tk.StringVar(value=str(self.settings.contracts))
         self._sfield(tab, "Entry points (±)", self.var_points, 3, width=8)
         self._sfield(tab, "Stop-loss points", self.var_sl, 4, width=8)
-        self._sfield(tab, "Take-profit points", self.var_tp, 5, width=8)
+        self._sfield(tab, "Take-profit points (0 = none)", self.var_tp, 5, width=8)
         self._sfield(tab, "Contracts", self.var_contracts, 6, width=8)
 
         self.var_mode = tk.StringVar(value=self.settings.trade_mode)

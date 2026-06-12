@@ -256,12 +256,13 @@ class ProjectXClient:
         mirrored. (Live-verified 2026-06-09: unsigned ticks are rejected with
         "Ticks should be less than zero when longing.")
         """
+        # take_profit_ticks == 0 -> no TP bracket (never rest a limit order)
         if leg.side == OrderSide.BUY:
             sl_ticks = -leg.stop_loss_ticks
-            tp_ticks = leg.take_profit_ticks
+            tp_ticks = leg.take_profit_ticks if leg.take_profit_ticks else None
         else:
             sl_ticks = leg.stop_loss_ticks
-            tp_ticks = -leg.take_profit_ticks
+            tp_ticks = -leg.take_profit_ticks if leg.take_profit_ticks else None
         result = self.place_order(
             account_id=account_id,
             contract_id=contract_id,

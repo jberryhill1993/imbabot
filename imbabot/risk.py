@@ -57,8 +57,10 @@ class RiskGuard:
                 f"Contracts ({s.contracts}) exceeds the safety cap "
                 f"max_contracts={s.max_contracts}. Raise the cap deliberately if intended."
             )
-        if s.entry_points <= 0 or s.stop_loss_points <= 0 or s.take_profit_points <= 0:
-            raise RiskError("Points (entry/stop/target) must all be > 0.")
+        if s.entry_points <= 0 or s.stop_loss_points <= 0:
+            raise RiskError("Entry and stop-loss points must be > 0.")
+        if s.take_profit_points < 0:
+            raise RiskError("Take-profit points must be >= 0 (0 = no take-profit).")
         count = self._today_count()
         if count >= s.max_trades_per_day:
             raise RiskError(

@@ -65,6 +65,12 @@ def run_selftest() -> int:
            f"got {plan.long_leg.take_profit_ticks}")
     _check("tags differ", plan.long_leg.custom_tag != plan.short_leg.custom_tag)
 
+    # 2b) TP=0 disables the take-profit bracket — no limit order is ever sent
+    params0 = StrategyParams(entry_points=2, stop_loss_points=3, take_profit_points=0, contracts=1)
+    plan0 = build_straddle(contract, 21000.0, params0, tag_prefix="t")
+    _check("TP=0 -> 0 TP ticks in plan",
+           plan0.long_leg.take_profit_ticks == 0 and plan0.short_leg.take_profit_ticks == 0)
+
     # 3) scheduler: fixed 'now' before the open today -> fire is 09:29:57 today
     tz = ZoneInfo("America/New_York")
     now = datetime(2026, 6, 4, 8, 0, 0, tzinfo=tz)
@@ -125,6 +131,16 @@ def run_selftest() -> int:
     _check("short brackets signed (SL>0 / TP<0)",
            sell_rec["take_profit_ticks"] < 0 < sell_rec["stop_loss_ticks"],
            f"SL={sell_rec['stop_loss_ticks']} TP={sell_rec['take_profit_ticks']}")
+
+    # 5a) TP=0 end-to-end: orders go out with NO takeProfit bracket at all
+    eng, fake = make_engine(dry_run=False, trade_mode="semi_auto", take_profit_points=0)
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    _check("TP=0 -> no TP bracket on any order",
+           all(o.get("take_profit_ticks") is None for o in fake.placed),
+           f"placed={fake.placed}")
+    _check("TP=0 -> SL bracket still present",
+           all(o.get("stop_loss_ticks") not in (None, 0) for o in fake.placed))
     long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
     _check("both legs have order ids", long_oid is not None and short_oid is not None)
     fake.simulate_fill(eng.contract.id, +2)            # long side fills

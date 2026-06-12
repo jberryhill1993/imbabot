@@ -37,8 +37,8 @@ class StrategyParams:
             raise ValueError("entry_points must be > 0")
         if self.stop_loss_points <= 0:
             raise ValueError("stop_loss_points must be > 0")
-        if self.take_profit_points <= 0:
-            raise ValueError("take_profit_points must be > 0")
+        if self.take_profit_points < 0:
+            raise ValueError("take_profit_points must be >= 0 (0 = no take-profit)")
         if self.contracts < 1:
             raise ValueError("contracts must be >= 1")
 
@@ -61,7 +61,8 @@ def build_straddle(
     short_stop = round_to_tick(reference_price - params.entry_points, tick)
 
     sl_ticks = points_to_ticks(params.stop_loss_points, tick)
-    tp_ticks = points_to_ticks(params.take_profit_points, tick)
+    # 0 = no take-profit bracket at all (no resting limit order is ever created)
+    tp_ticks = points_to_ticks(params.take_profit_points, tick) if params.take_profit_points > 0 else 0
 
     long_leg = StraddleLeg(
         side=OrderSide.BUY,
@@ -91,11 +92,14 @@ def describe_plan(plan: StraddlePlan) -> str:
     """Human-readable summary for logs and the confirm/arm step."""
     c = plan.contract
     L, S = plan.long_leg, plan.short_leg
+    def _tp(leg):
+        return f"TP {leg.take_profit_ticks}t" if leg.take_profit_ticks else "TP none"
+
     return (
         f"Straddle on {c.name} ({c.id})\n"
         f"  reference price : {plan.reference_price:,.2f}\n"
         f"  LONG  : BUY  STOP {L.size} @ {L.stop_price:,.2f}  "
-        f"(SL {L.stop_loss_ticks}t / TP {L.take_profit_ticks}t)\n"
+        f"(SL {L.stop_loss_ticks}t / {_tp(L)})\n"
         f"  SHORT : SELL STOP {S.size} @ {S.stop_price:,.2f}  "
-        f"(SL {S.stop_loss_ticks}t / TP {S.take_profit_ticks}t)"
+        f"(SL {S.stop_loss_ticks}t / {_tp(S)})"
     )

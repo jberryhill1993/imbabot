@@ -67,11 +67,14 @@ class FakeClient:
         if leg.side in self.reject_sides:
             return OrderResult(order_id=None, success=False, error_code=99,
                                error_message="rejected (fake)")
-        # same SIGNED bracket convention as the real client (+above / -below fill)
+        # same SIGNED bracket convention as the real client (+above / -below fill);
+        # take_profit_ticks == 0 -> no TP bracket
         if leg.side == OrderSide.BUY:
-            sl_ticks, tp_ticks = -leg.stop_loss_ticks, leg.take_profit_ticks
+            sl_ticks = -leg.stop_loss_ticks
+            tp_ticks = leg.take_profit_ticks if leg.take_profit_ticks else None
         else:
-            sl_ticks, tp_ticks = leg.stop_loss_ticks, -leg.take_profit_ticks
+            sl_ticks = leg.stop_loss_ticks
+            tp_ticks = -leg.take_profit_ticks if leg.take_profit_ticks else None
         res = self.place_order(
             account_id=account_id, contract_id=contract_id,
             order_type=OrderType.STOP, side=leg.side, size=leg.size,
