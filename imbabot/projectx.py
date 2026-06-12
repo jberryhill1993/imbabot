@@ -177,14 +177,22 @@ class ProjectXClient:
         return [Bar.from_api(b) for b in data.get("bars", [])]
 
     def last_price(self, contract_id: str, live: bool = False) -> float:
-        """Best-effort latest traded price via the most recent (partial) 1-min bar."""
-        bars = self.retrieve_bars(
-            contract_id, unit=2, unit_number=1, limit=2, live=live,
-            include_partial_bar=True,
-        )
-        if not bars:
-            raise ProjectXError("No bars returned; cannot determine last price.")
-        return bars[-1].c
+        """Latest traded price via the freshest (partial) bar.
+
+        Prefers 1-second bars so the reference is the price *now*, falling
+        back to 1-minute bars if seconds are unavailable. Bars are returned
+        newest-first, so pick by timestamp — never by list position.
+        (Live-verified 2026-06-12: bars[-1] was the OLDEST bar, a minutes-old
+        close that mis-centered the straddle onto a stale price.)
+        """
+        for unit, limit in ((1, 3), (2, 2)):  # 1=Second, 2=Minute
+            bars = self.retrieve_bars(
+                contract_id, unit=unit, unit_number=1, limit=limit, live=live,
+                include_partial_bar=True,
+            )
+            if bars:
+                return max(bars, key=lambda b: b.t).c
+        raise ProjectXError("No bars returned; cannot determine last price.")
 
     def session_range(
         self, contract_id: str, start: datetime, end: datetime, live: bool = False
