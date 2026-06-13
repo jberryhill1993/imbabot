@@ -8,6 +8,7 @@ Endpoints verified against https://gateway.docs.projectx.com :
     POST /api/Contract/search      {searchText, live}           -> {contracts[]}
     POST /api/History/retrieveBars {contractId, live, start...} -> {bars[]}
     POST /api/Order/place          {accountId, contractId, ...} -> {orderId}
+    POST /api/Order/modify         {accountId, orderId, stopPrice...} -> {success}
     POST /api/Order/cancel         {accountId, orderId}         -> {success}
     POST /api/Order/searchOpen     {accountId}                  -> {orders[]}
     POST /api/Position/searchOpen  {accountId}                  -> {positions[]}
@@ -276,6 +277,30 @@ class ProjectXClient:
         )
         leg.order_id = result.order_id
         return result
+
+    def modify_order(
+        self,
+        account_id: int,
+        order_id: int,
+        *,
+        stop_price: Optional[float] = None,
+        limit_price: Optional[float] = None,
+        size: Optional[int] = None,
+        trail_price: Optional[float] = None,
+    ) -> bool:
+        """Modify a working order in place (e.g. move a protective stop to
+        break-even). Only the fields you pass are changed."""
+        body: Dict[str, Any] = {"accountId": account_id, "orderId": int(order_id)}
+        if stop_price is not None:
+            body["stopPrice"] = stop_price
+        if limit_price is not None:
+            body["limitPrice"] = limit_price
+        if size is not None:
+            body["size"] = int(size)
+        if trail_price is not None:
+            body["trailPrice"] = trail_price
+        self._post("/api/Order/modify", body)
+        return True
 
     def cancel_order(self, account_id: int, order_id: int) -> bool:
         self._post("/api/Order/cancel", {"accountId": account_id, "orderId": order_id})

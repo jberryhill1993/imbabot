@@ -253,5 +253,27 @@ def run_selftest() -> int:
     _check("flatten_all left working orders alone", fake.cancelled == [],
            f"cancelled={fake.cancelled}")
 
+    # 10) break-even moves the protective '-SL' stop to the position's entry,
+    # and leaves a still-working opposite entry untouched
+    from .models import OrderType
+    eng, fake = make_engine(dry_run=False, trade_mode="two_trade")
+    cid = eng.contract.id
+    # a protective stop (bracket child) + a still-working opposite entry
+    sl = fake.place_order(account_id=42, contract_id=cid, order_type=OrderType.STOP,
+                          side=OrderSide.SELL, size=1, stop_price=20990.0,
+                          custom_tag="imbabot-x-L-SL")
+    opp = fake.place_order(account_id=42, contract_id=cid, order_type=OrderType.STOP,
+                           side=OrderSide.SELL, size=1, stop_price=20988.0,
+                           custom_tag="imbabot-x-S")
+    fake.simulate_fill(cid, +1, avg_price=21007.3)     # long fill at 21007.3
+    eng.break_even()
+    moved = fake.orders.get(sl.order_id, {})
+    _check("break-even moved the -SL stop to entry tick",
+           moved.get("stop_price") == 21007.25, f"got {moved.get('stop_price')}")
+    _check("break-even left the opposite entry alone",
+           fake.orders.get(opp.order_id, {}).get("stop_price") == 20988.0)
+    _check("break-even used modify (not cancel)", fake.cancelled == [] and len(fake.modified) == 1,
+           f"cancelled={fake.cancelled} modified={fake.modified}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

@@ -25,6 +25,7 @@ class FakeClient:
         self._lock = threading.Lock()
         self.authenticated = False
         self.reject_sides: set = set()  # OrderSides whose entry placement is rejected
+        self.modified: List[Dict[str, Any]] = []  # record of modify_order calls
 
     # --- auth / account / contract ---
     def authenticate(self, username: str, api_key: str) -> str:
@@ -84,6 +85,22 @@ class FakeClient:
         leg.order_id = res.order_id
         return res
 
+    def modify_order(self, account_id: int, order_id: int, *, stop_price=None,
+                     limit_price=None, size=None, trail_price=None) -> bool:
+        with self._lock:
+            rec = self.orders.get(order_id)
+            if rec is None:
+                return False
+            if stop_price is not None:
+                rec["stop_price"] = rec["stopPrice"] = stop_price
+            if limit_price is not None:
+                rec["limit_price"] = rec["limitPrice"] = limit_price
+            if size is not None:
+                rec["size"] = int(size)
+            self.modified.append({"order_id": order_id, "stop_price": stop_price,
+                                  "limit_price": limit_price, "size": size})
+        return True
+
     def cancel_order(self, account_id: int, order_id: int) -> bool:
         with self._lock:
             self.orders.pop(order_id, None)
@@ -99,17 +116,19 @@ class FakeClient:
             return list(self.positions)
 
     # --- test helpers ---
-    def simulate_fill(self, contract_id: str, net: int) -> None:
+    def simulate_fill(self, contract_id: str, net: int, avg_price: float = None) -> None:
         """Pretend an entry filled: open a position of `net` (>0 long, <0 short).
 
-        Mirrors the real ProjectX payload (type: 1=Long 2=Short, unsigned size)
-        and removes the filled entry from the open-order book, as live does.
+        Mirrors the real ProjectX payload (type: 1=Long 2=Short, unsigned size,
+        averagePrice) and removes the filled entry from the open-order book, as
+        live does.
         """
         with self._lock:
             self.positions = [{
                 "contractId": contract_id,
                 "type": 1 if net > 0 else 2,
                 "size": abs(net),
+                "averagePrice": self._last if avg_price is None else avg_price,
             }]
             filled_side = OrderSide.BUY if net > 0 else OrderSide.SELL
             for oid, rec in list(self.orders.items()):

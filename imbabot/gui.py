@@ -446,6 +446,8 @@ class ImbabotGUI:
         self.btn_panic.pack(side="right")
         self.btn_flatten = ttk.Button(ctrl, text="▽  FLATTEN", command=self._on_flatten, style="Warning.TButton")
         self.btn_flatten.pack(side="right", padx=(0, 10))
+        self.btn_breakeven = ttk.Button(ctrl, text="⤢  BREAK-EVEN", command=self._on_breakeven, style="Ghost.TButton")
+        self.btn_breakeven.pack(side="right", padx=(0, 10))
 
         # ===== settings notebook =====
         nb = ttk.Notebook(root)
@@ -845,6 +847,15 @@ class ImbabotGUI:
             messagebox.showinfo("Connect first", "Connect before flattening.")
             return
         threading.Thread(target=self.engine.flatten_all, daemon=True).start()
+
+    def _on_breakeven(self) -> None:
+        if self.var_backend.get() == "browser":
+            messagebox.showinfo("API only", "Break-even is available on the API backend only.")
+            return
+        if not self.engine:
+            messagebox.showinfo("Connect first", "Connect before using break-even.")
+            return
+        threading.Thread(target=self.engine.break_even, daemon=True).start()
 
     def _on_test_toggle(self) -> None:
         if self.var_test_mode.get():
