@@ -295,11 +295,36 @@ Your **API key is never stored in this file** — it goes to the OS keychain
 
 ---
 
+## TopStep account setup (API backend)
+
+For the **API backend** (the recommended path), set these up on TopstepX once:
+
+- **API access enabled + an API key** — the paid ProjectX add-on. Stored in your
+  OS keychain, never in the settings file.
+- **"Auto OCO Brackets" enabled** in your TopStep trade settings. The bot attaches
+  a per-order stop-loss bracket, which is rejected while the account is in
+  "Position Brackets" mode (*"Brackets cannot be used with Position Brackets"*).
+- A **tradable account** (`canTrade = true`) that **allows automation** — Trading
+  Combine, Practice, or Funded-eval. Automation is **prohibited on a Live Funded**
+  account.
+- **Risk settings matched to your contract count.**
+
+**No TopStep screens need to be open.** Orders are placed server-side over the API —
+you don't need the chart, order ticket, or any TopStep window open for the bot to
+fire. (A chart is optional, just to watch.) This is the main advantage over the
+browser backend, which *does* require the chart open and the stop selected.
+
+**Trade modes:** *Semi-Auto* (you manage both orders), *One-Trade* (auto-cancels the
+opposite entry on a fill), and *Two-Trade* (leaves both working — set your platform
+**trade limit to 2/day** so both can fill). The **Break-even** button moves a filled
+position's protective stop to its entry price.
+
 ## Safety net (do this)
 
 The bot's guards are a backup. Also set, **on the TopstepX platform**:
 - **Daily loss limit** = your intended risk, with **liquidate** enabled.
-- **Trade limit = 1/day** to prevent an accidental second entry.
+- **Trade limit** = **1/day** (One-Trade/Semi-Auto) or **2/day** (Two-Trade) to
+  prevent an accidental extra entry.
 - A manual stop on platforms where the bracket may not display.
 
 ---
