@@ -17,6 +17,9 @@ import requests
 # same index, so this price mirrors what you'll see on the chart.
 DEFAULT_TICKER_SYMBOL = "NQ=F"
 
+# CBOE Volatility Index — the guide's daily routine reviews "the live VIX".
+VIX_SYMBOL = "^VIX"
+
 _CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Imbabot/1.0)"}
 
@@ -40,8 +43,8 @@ class Quote:
 
 
 def _display_symbol(yahoo_symbol: str) -> str:
-    """Strip Yahoo's futures suffix: 'NQ=F' -> 'NQ'."""
-    return yahoo_symbol.split("=", 1)[0].upper()
+    """Tidy Yahoo's symbols for display: 'NQ=F' -> 'NQ', '^VIX' -> 'VIX'."""
+    return yahoo_symbol.split("=", 1)[0].lstrip("^").upper()
 
 
 def fetch_quote(symbol: str = DEFAULT_TICKER_SYMBOL, timeout: float = 8.0) -> Optional[Quote]:

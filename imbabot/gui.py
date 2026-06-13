@@ -406,6 +406,15 @@ class ImbabotGUI:
         self.lbl_tick_price.pack(side="left", padx=(9, 7))
         self.lbl_tick_chg = ttk.Label(tick, text="connecting…", style="TickFlat.TLabel")
         self.lbl_tick_chg.pack(side="left", pady=(3, 0))
+        # live VIX chip — the guide's daily routine reviews the VIX
+        vix = ttk.Frame(header, style="Header.TFrame")
+        vix.pack(side="left", padx=(22, 0))
+        self.lbl_vix_sym = ttk.Label(vix, text="VIX", style="TickSym.TLabel")
+        self.lbl_vix_sym.pack(side="left")
+        self.lbl_vix_price = ttk.Label(vix, text="—", style="TickPrice.TLabel")
+        self.lbl_vix_price.pack(side="left", padx=(9, 7))
+        self.lbl_vix_chg = ttk.Label(vix, text="", style="TickFlat.TLabel")
+        self.lbl_vix_chg.pack(side="left", pady=(3, 0))
         badges = ttk.Frame(header, style="Header.TFrame")
         badges.pack(side="right")
         self.badge_conn = self._pill(badges, "Offline", "Sec")
@@ -922,6 +931,8 @@ class ImbabotGUI:
             self.lbl_range.configure(text=f"{rng['low']:,.1f}–{rng['high']:,.1f}" if rng else "—")
         elif kind == "ticker":
             self._update_ticker(evt[1])
+        elif kind == "ticker_vix":
+            self._update_vix(evt[1])
         elif kind == "error":
             self.log(evt[1], "error")
 
@@ -987,11 +998,11 @@ class ImbabotGUI:
         threading.Thread(target=self._ticker_worker, name="Ticker", daemon=True).start()
 
     def _ticker_worker(self) -> None:
-        from .ticker import fetch_quote, DEFAULT_TICKER_SYMBOL
+        from .ticker import fetch_quote, DEFAULT_TICKER_SYMBOL, VIX_SYMBOL
 
         while not self._tick_stop.is_set():
-            quote = fetch_quote(DEFAULT_TICKER_SYMBOL)
-            self.events.put(("ticker", quote))
+            self.events.put(("ticker", fetch_quote(DEFAULT_TICKER_SYMBOL)))
+            self.events.put(("ticker_vix", fetch_quote(VIX_SYMBOL)))
             self._tick_stop.wait(5.0)
 
     def _update_ticker(self, q) -> None:
@@ -1005,6 +1016,19 @@ class ImbabotGUI:
         arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "■")
         style = "TickUp.TLabel" if chg > 0 else ("TickDown.TLabel" if chg < 0 else "TickFlat.TLabel")
         self.lbl_tick_chg.configure(text=f"{arrow} {chg:+,.2f} ({pct:+.2f}%)", style=style)
+
+    def _update_vix(self, q) -> None:
+        if q is None:
+            if self.lbl_vix_price.cget("text") == "—":
+                self.lbl_vix_chg.configure(text="no feed", style="TickFlat.TLabel")
+            return
+        self.lbl_vix_price.configure(text=f"{q.price:,.2f}")
+        chg, pct = q.change, q.change_pct
+        # VIX up = fear up = risk-off, so colour it the opposite of a price tape:
+        # a rising VIX is "bad" (red), a falling VIX is "good" (green).
+        arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "■")
+        style = "TickDown.TLabel" if chg > 0 else ("TickUp.TLabel" if chg < 0 else "TickFlat.TLabel")
+        self.lbl_vix_chg.configure(text=f"{arrow} {chg:+,.2f} ({pct:+.2f}%)", style=style)
 
     def _start_poller(self) -> None:
         self._poll_stop.clear()
@@ -1041,7 +1065,14 @@ def main() -> int:
         shot_path = sys.argv[i + 1] if i + 1 < len(sys.argv) else "/tmp/imba_gui.png"
     root = tk.Tk()
     app = ImbabotGUI(root, shot_path=shot_path)
-    if not root.winfo_exists():
+    # If the disclaimer was declined, __init__ already called root.destroy();
+    # winfo_exists() then raises TclError ("application has been destroyed")
+    # rather than returning False, so guard it and exit cleanly.
+    try:
+        alive = bool(root.winfo_exists())
+    except tk.TclError:
+        alive = False
+    if not alive:
         return 0
     root.protocol("WM_DELETE_WINDOW", app.on_close)
     root.mainloop()
