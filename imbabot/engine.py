@@ -202,6 +202,12 @@ class BotEngine:
             f"{self.settings.open_hour:02d}:{self.settings.open_minute:02d} open). "
             f"Mode={self.settings.trade_mode} dry_run={self.settings.dry_run}."
         )
+        if self.settings.trade_mode == TradeMode.TWO_TRADE.value:
+            self.log(
+                "Two-Trade mode: both entries stay working (no auto-cancel). "
+                "Set your TopStep trade limit to 2/day so both legs can fill.",
+                "warn",
+            )
         self._timer = FireTimer(target=fire, on_fire=self._on_fire, on_tick=on_tick)
         self._timer.arm()
         return fire

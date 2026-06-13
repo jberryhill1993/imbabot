@@ -549,14 +549,16 @@ class ImbabotGUI:
                         style="S.TRadiobutton").grid(row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
         ttk.Radiobutton(tab, text="One-Trade (auto OCO)", variable=self.var_mode, value="one_trade",
                         style="S.TRadiobutton").grid(row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Radiobutton(tab, text="Two-Trade (leave both in)", variable=self.var_mode, value="two_trade",
+                        style="S.TRadiobutton").grid(row=6, column=2, columnspan=2, sticky="w", padx=(28, 0))
         self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
         self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
         ttk.Checkbutton(tab, text="Use live data feed", variable=self.var_live_data,
-                        style="S.TCheckbutton").grid(row=6, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
                         style="S.TCheckbutton").grid(row=7, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
+                        style="S.TCheckbutton").grid(row=8, column=2, columnspan=2, sticky="w", padx=(28, 0))
         ttk.Button(tab, text="Save settings", command=self._on_save, style="Accent.TButton").grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+            row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     def _build_tab_test(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)

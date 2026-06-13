@@ -37,6 +37,10 @@ class TradeMode(str, Enum):
     # Fully automated single trade: whichever entry fills first stays, the bot
     # cancels the opposite entry automatically (a one-cancels-the-other pair).
     ONE_TRADE = "one_trade"
+    # Leave both entries working: either/both may fill (up to two trades). The
+    # bot never auto-cancels the opposite leg — you manage it. Set the platform
+    # trade limit to 2/day for this mode.
+    TWO_TRADE = "two_trade"
 
 
 @dataclass
