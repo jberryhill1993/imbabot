@@ -186,13 +186,22 @@ class ProjectXClient:
         (Live-verified 2026-06-12: bars[-1] was the OLDEST bar, a minutes-old
         close that mis-centered the straddle onto a stale price.)
         """
-        for unit, limit in ((1, 3), (2, 2)):  # 1=Second, 2=Minute
-            bars = self.retrieve_bars(
-                contract_id, unit=unit, unit_number=1, limit=limit, live=live,
-                include_partial_bar=True,
-            )
-            if bars:
-                return max(bars, key=lambda b: b.t).c
+        # 1) freshest 1-second bar (narrow window) — the live price when open.
+        bars = self.retrieve_bars(
+            contract_id, unit=1, unit_number=1, limit=3, live=live,
+            include_partial_bar=True,
+        )
+        if bars:
+            return max(bars, key=lambda b: b.t).c
+        # 2) fall back to minute bars over a WIDE window so we still return the
+        #    last traded price across a weekend/holiday gap (market closed).
+        end = datetime.now(timezone.utc)
+        bars = self.retrieve_bars(
+            contract_id, unit=2, unit_number=1, limit=5000, live=live,
+            start_time=end - timedelta(days=5), end_time=end, include_partial_bar=True,
+        )
+        if bars:
+            return max(bars, key=lambda b: b.t).c
         raise ProjectXError("No bars returned; cannot determine last price.")
 
     def session_range(
