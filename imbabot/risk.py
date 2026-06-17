@@ -61,12 +61,17 @@ class RiskGuard:
             raise RiskError("Entry and stop-loss points must be > 0.")
         if s.take_profit_points < 0:
             raise RiskError("Take-profit points must be >= 0 (0 = no take-profit).")
-        count = self._today_count()
-        if count >= s.max_trades_per_day:
-            raise RiskError(
-                f"Daily trade limit reached ({count}/{s.max_trades_per_day}). "
-                "Reset is automatic at the next calendar day."
-            )
+        # The daily trade limit guards real (9:30) trading. Test-mode fires are
+        # iterative verification on a practice account, so they neither count
+        # toward nor are blocked by it — TopStep's own platform trade-limit is
+        # the real backstop. (record_trade() is likewise skipped in test mode.)
+        if not s.test_mode:
+            count = self._today_count()
+            if count >= s.max_trades_per_day:
+                raise RiskError(
+                    f"Daily trade limit reached ({count}/{s.max_trades_per_day}). "
+                    "Reset is automatic at the next calendar day."
+                )
 
     def check_can_send_orders(self) -> None:
         """Final gate right before live order placement."""

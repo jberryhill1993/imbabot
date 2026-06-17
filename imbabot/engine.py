@@ -320,7 +320,9 @@ class BotEngine:
                 "you don't want the one-direction trade.",
                 "warn",
             )
-        self.risk.record_trade()
+        # Don't let iterative test-mode fires pollute the real daily-trade count.
+        if not self.settings.test_mode:
+            self.risk.record_trade()
 
     # -------------------------------------------------------------- monitor
     def _start_monitor(self, plan: StraddlePlan) -> None:
