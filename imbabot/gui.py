@@ -571,7 +571,7 @@ class ImbabotGUI:
         ttk.Checkbutton(tab, text="Test mode: fire at a custom time (instead of 9:30)",
                         variable=self.var_test_mode, command=self._on_test_toggle,
                         style="S.TCheckbutton").grid(row=1, column=0, columnspan=3, sticky="w", pady=(10, 6))
-        ttk.Label(tab, text="Fire at (HH:MM:SS) — your computer's clock", style="Sm.TLabel").grid(
+        ttk.Label(tab, text="Fire at (HH:MM:SS, 24-hour) — your computer's clock", style="Sm.TLabel").grid(
             row=2, column=0, sticky="w", pady=5)
         self.var_test_time = tk.StringVar(value=self.settings.test_fire_time)
         ttk.Entry(tab, textvariable=self.var_test_time, width=12, font=(FONT, 11)).grid(row=2, column=1, sticky="w")
@@ -582,9 +582,9 @@ class ImbabotGUI:
                                        command=self._on_schedule_autofire, style="Success.TButton")
         self.btn_autofire.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
         ttk.Label(tab, text="Use a SIM / practice account. The bot fires off your computer's clock "
-                            "(the Windows taskbar time — NOT the chart's UTC-5). Enter a time, click "
-                            "Save & schedule, and it auto-fires then; or click ‘Fire TEST now’. "
-                            "DISARM or this button cancels it. Honors dry-run.",
+                            "(the Windows taskbar time — NOT the chart's UTC-5), in 24-hour format "
+                            "(7:50 PM = 19:50). Enter a time, click Save & schedule, and it auto-fires "
+                            "then; or click ‘Fire TEST now’. DISARM or this button cancels it. Honors dry-run.",
                   style="Hint.TLabel", wraplength=840).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
     def _surface(self, tab):
@@ -811,8 +811,22 @@ class ImbabotGUI:
         try:
             parse_hms(raw)
         except ValueError as exc:
-            messagebox.showerror("Invalid time", f"Use HH:MM or HH:MM:SS (your computer's clock).\n\n{exc}")
+            messagebox.showerror("Invalid time", f"Use HH:MM or HH:MM:SS (24-hour, your computer's clock).\n\n{exc}")
             return
+        # If the chosen time already passed today, next_local_fire rolls it to
+        # tomorrow. Make that explicit so "nothing happened" can't surprise you.
+        now = datetime.now().astimezone()
+        fire = next_local_fire(raw)
+        if fire.date() != now.date():
+            if not messagebox.askyesno(
+                "Fires TOMORROW",
+                f"{raw} has already passed on your computer's clock "
+                f"({now.strftime('%H:%M:%S')}).\n\nThis will fire TOMORROW — "
+                f"{fire.strftime('%a %b %d at %H:%M:%S')}.\n\n"
+                "Schedule it for tomorrow? (Times are 24-hour: use 19:50 for 7:50 PM.)",
+                icon="warning", default="no",
+            ):
+                return
         # Lock it in: test mode on + save, then push settings to the engine.
         self.var_test_mode.set(True)
         s = self._collect_settings()
@@ -838,8 +852,7 @@ class ImbabotGUI:
             return
         self.btn_arm.configure(text="DISARM", style="Warning.TButton")
         self.btn_autofire.configure(text="✖  Cancel auto-fire")
-        fire = next_local_fire(raw)
-        self.log(f"Auto-fire scheduled for {fire.strftime('%H:%M:%S')} "
+        self.log(f"Auto-fire scheduled for {fire.strftime('%a %b %d %H:%M:%S')} "
                  "(your computer's local clock) — it will fire automatically.")
 
     def _on_arm_browser(self) -> None:
