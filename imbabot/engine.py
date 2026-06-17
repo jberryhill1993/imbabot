@@ -120,6 +120,8 @@ class BotEngine:
             stop_loss_points=s.stop_loss_points,
             take_profit_points=s.take_profit_points,
             contracts=s.contracts,
+            bot_stop_loss=s.bot_stop_loss,
+            bot_take_profit=s.bot_take_profit,
         )
 
     def next_fire(self, now: Optional[datetime] = None) -> datetime:
@@ -455,119 +457,6 @@ class BotEngine:
         self._flatten_positions(self.account.id)
         self.log("Flatten complete.")
 
-    # ----------------------------------------------------------- break-even
-    def break_even(self) -> None:
-        """Move the open position's protective stop to its entry price.
-
-        Works off live API state (not last_plan) so it survives a restart. The
-        bot no longer attaches its own ``-SL`` bracket; the protective stop is
-        TopStep's Position Bracket, attached to the position on fill. We locate
-        it by: (a) any ``-SL``-tagged stop, for back-compat; else (b) an open
-        STOP order on this contract on the side *opposite* the net position
-        (long -> protective SELL, short -> protective BUY). In One-Trade mode the
-        opposite entry has already been cancelled, so this is unambiguous; if
-        more than one candidate is found we refuse to guess and ask the operator
-        to move it on TopStep.
-        """
-        self.log("BREAK-EVEN requested — moving the protective stop to entry.", "warn")
-        if not (self.account and self.contract):
-            self.log("Connect (account + contract) before break-even.", "warn")
-            return
-        try:
-            self._ensure_session()
-        except Exception as exc:
-            self.log(f"session refresh failed during break-even: {exc} — attempting anyway.", "warn")
-        acct = self.account.id
-        cid = self.contract.id
-        try:
-            positions = self.client.search_open_positions(acct)
-        except Exception as exc:
-            self.log(f"position lookup failed: {exc}", "error")
-            return
-        net = _net_position_for(positions, cid)
-        if net == 0:
-            self.log("No open position on this contract; nothing to move.", "warn")
-            return
-        avg = _avg_entry_price(positions, cid)
-        if avg is None:
-            self.log("Could not read the position's entry price; aborting break-even.", "error")
-            return
-        target = round_to_tick(avg, self.contract.tick_size)
-        try:
-            orders = self.client.search_open_orders(acct)
-        except Exception as exc:
-            self.log(f"order lookup failed: {exc}", "error")
-            return
-        # (a) legacy bot-tagged bracket child, if any still exist
-        stops = [
-            o for o in orders
-            if _order_contract(o) == cid and str(_order_tag(o) or "").endswith("-SL")
-        ]
-        # (b) fall back to TopStep's Position Bracket: a working STOP on this
-        #     contract on the protective side (opposite the net position).
-        if not stops:
-            protective = OrderSide.SELL.value if net > 0 else OrderSide.BUY.value
-            stops = [
-                o for o in orders
-                if _order_contract(o) == cid
-                and _order_stop(o) is not None
-                and _order_side(o) == protective
-            ]
-        if not stops:
-            self.log(
-                "No protective stop found for this position. If your stop is "
-                "platform-managed, move it to break-even on TopStep manually.",
-                "error",
-            )
-            return
-        if len(stops) > 1:
-            prices = ", ".join(str(_order_stop(o)) for o in stops)
-            self.log(
-                f"Found {len(stops)} candidate stops on the protective side "
-                f"({prices}); refusing to guess which is the protective stop. "
-                "Move it to break-even on TopStep manually.",
-                "error",
-            )
-            return
-        for o in stops:
-            oid = _order_id(o)
-            if oid is None:
-                continue
-            old = _order_stop(o)
-            try:
-                self.client.modify_order(acct, oid, stop_price=target)
-                self.log(
-                    f"Break-even: stop orderId={oid} moved {old} -> {target:,.2f} "
-                    f"(entry {avg:,.2f})."
-                )
-            except Exception as exc:
-                self.log(f"modify failed ({exc}); trying cancel+replace.", "warn")
-                self._replace_stop(acct, cid, o, target, net)
-
-    def _replace_stop(self, acct: int, cid: str, order: Dict[str, Any],
-                      target: float, net: int) -> None:
-        """Fallback when modify isn't available: cancel the stop and re-place it
-        at ``target``. Leaves a brief unprotected window — logged loudly."""
-        oid = _order_id(order)
-        side = OrderSide.SELL if net > 0 else OrderSide.BUY  # protective side
-        try:
-            if oid is not None:
-                self.client.cancel_order(acct, oid)
-            res = self.client.place_order(
-                account_id=acct, contract_id=cid, order_type=OrderType.STOP,
-                side=side, size=abs(net), stop_price=target,
-                custom_tag=(_order_tag(order) or "imbabot-be"),
-            )
-            if res.success:
-                self.log(f"Break-even: replaced stop -> new orderId={res.order_id} @ {target:,.2f}.")
-            else:
-                self.log(
-                    f"Replace stop REJECTED: {res.error_message} — position is UNPROTECTED, "
-                    "act NOW.", "error",
-                )
-        except Exception as exc:
-            self.log(f"cancel+replace failed: {exc} — position may be UNPROTECTED, act NOW.", "error")
-
     def _cancel_all_orders(self, acct: int) -> None:
         try:
             for o in self.client.search_open_orders(acct):
@@ -643,39 +532,3 @@ def _order_id(o: Dict[str, Any]) -> Optional[int]:
     return None
 
 
-def _order_tag(o: Dict[str, Any]) -> Optional[str]:
-    return o.get("customTag") or o.get("custom_tag")
-
-
-def _order_stop(o: Dict[str, Any]):
-    return o.get("stopPrice", o.get("stop_price"))
-
-
-def _order_side(o: Dict[str, Any]) -> Optional[int]:
-    """Order side as an int (0=BUY, 1=SELL), or None if absent."""
-    v = o.get("side")
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _order_contract(o: Dict[str, Any]) -> Optional[str]:
-    return o.get("contractId") or o.get("contract_id")
-
-
-def _avg_entry_price(positions: List[Dict[str, Any]], contract_id: str) -> Optional[float]:
-    for p in positions:
-        cid = p.get("contractId") or p.get("contract_id")
-        if cid != contract_id:
-            continue
-        for key in ("averagePrice", "avgPrice", "averagePx", "entryPrice", "price"):
-            v = p.get(key)
-            if v is not None:
-                try:
-                    return float(v)
-                except (TypeError, ValueError):
-                    continue
-    return None

@@ -63,6 +63,11 @@ class Settings:
     take_profit_points: float = 12.0
     contracts: int = 2
     trade_mode: str = "semi_auto"    # "semi_auto" | "one_trade"
+    # SL/TP are handled by TopStep Position Brackets by default (naked entries).
+    # Enable these to have the BOT attach its own bracket instead (requires the
+    # TopStep account to be in Auto OCO Brackets mode, not Position Brackets).
+    bot_stop_loss: bool = False
+    bot_take_profit: bool = False
 
     # --- timing ---
     market_tz: str = "America/New_York"

@@ -57,8 +57,10 @@ class RiskGuard:
                 f"Contracts ({s.contracts}) exceeds the safety cap "
                 f"max_contracts={s.max_contracts}. Raise the cap deliberately if intended."
             )
-        if s.entry_points <= 0 or s.stop_loss_points <= 0:
-            raise RiskError("Entry and stop-loss points must be > 0.")
+        if s.entry_points <= 0:
+            raise RiskError("Entry points must be > 0.")
+        if s.bot_stop_loss and s.stop_loss_points <= 0:
+            raise RiskError("Stop-loss points must be > 0 when the bot manages the stop.")
         if s.take_profit_points < 0:
             raise RiskError("Take-profit points must be >= 0 (0 = no take-profit).")
         # The daily trade limit guards real (9:30) trading. Test-mode fires are

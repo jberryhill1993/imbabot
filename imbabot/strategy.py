@@ -31,12 +31,16 @@ class StrategyParams:
     stop_loss_points: float = 12.0  # protective stop distance from fill
     take_profit_points: float = 12.0  # target distance from fill
     contracts: int = 2
+    # When False (default) SL/TP are platform-managed (TopStep Position Brackets)
+    # and the bot places naked entries. When True the bot attaches that bracket.
+    bot_stop_loss: bool = False
+    bot_take_profit: bool = False
 
     def validate(self) -> None:
         if self.entry_points <= 0:
             raise ValueError("entry_points must be > 0")
-        if self.stop_loss_points <= 0:
-            raise ValueError("stop_loss_points must be > 0")
+        if self.bot_stop_loss and self.stop_loss_points <= 0:
+            raise ValueError("stop_loss_points must be > 0 when the bot manages the stop")
         if self.take_profit_points < 0:
             raise ValueError("take_profit_points must be >= 0 (0 = no take-profit)")
         if self.contracts < 1:
@@ -60,9 +64,11 @@ def build_straddle(
     long_stop = round_to_tick(reference_price + params.entry_points, tick)
     short_stop = round_to_tick(reference_price - params.entry_points, tick)
 
-    sl_ticks = points_to_ticks(params.stop_loss_points, tick)
-    # 0 = no take-profit bracket at all (no resting limit order is ever created)
-    tp_ticks = points_to_ticks(params.take_profit_points, tick) if params.take_profit_points > 0 else 0
+    # 0 ticks = no bracket sent (naked entry). SL/TP are only bot-attached when
+    # the operator opts in; otherwise TopStep's Position Brackets handle them.
+    sl_ticks = points_to_ticks(params.stop_loss_points, tick) if params.bot_stop_loss else 0
+    tp_ticks = (points_to_ticks(params.take_profit_points, tick)
+                if params.bot_take_profit and params.take_profit_points > 0 else 0)
 
     long_leg = StraddleLeg(
         side=OrderSide.BUY,
@@ -92,14 +98,16 @@ def describe_plan(plan: StraddlePlan) -> str:
     """Human-readable summary for logs and the confirm/arm step."""
     c = plan.contract
     L, S = plan.long_leg, plan.short_leg
+    def _sl(leg):
+        return f"SL {leg.stop_loss_ticks}t" if leg.stop_loss_ticks else "SL platform"
     def _tp(leg):
-        return f"TP {leg.take_profit_ticks}t" if leg.take_profit_ticks else "TP none"
+        return f"TP {leg.take_profit_ticks}t" if leg.take_profit_ticks else "TP platform"
 
     return (
         f"Straddle on {c.name} ({c.id})\n"
         f"  reference price : {plan.reference_price:,.2f}\n"
         f"  LONG  : BUY  STOP {L.size} @ {L.stop_price:,.2f}  "
-        f"(SL {L.stop_loss_ticks}t / {_tp(L)})\n"
+        f"({_sl(L)} / {_tp(L)})\n"
         f"  SHORT : SELL STOP {S.size} @ {S.stop_price:,.2f}  "
-        f"(SL {S.stop_loss_ticks}t / {_tp(S)})"
+        f"({_sl(S)} / {_tp(S)})"
     )

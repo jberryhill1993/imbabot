@@ -68,13 +68,18 @@ class FakeClient:
         if leg.side in self.reject_sides:
             return OrderResult(order_id=None, success=False, error_code=99,
                                error_message="rejected (fake)")
-        # Naked STOP entry — no attached brackets, mirroring the real client.
-        # The straddle rests exactly two orders; SL/TP are platform-managed
-        # Position Brackets on TopStep, not per-order brackets.
+        # Naked by default; attach a SIGNED bracket only when the leg opts in
+        # (non-zero ticks), mirroring the real client.
+        sl_ticks = tp_ticks = None
+        if leg.stop_loss_ticks:
+            sl_ticks = -leg.stop_loss_ticks if leg.side == OrderSide.BUY else leg.stop_loss_ticks
+        if leg.take_profit_ticks:
+            tp_ticks = leg.take_profit_ticks if leg.side == OrderSide.BUY else -leg.take_profit_ticks
         res = self.place_order(
             account_id=account_id, contract_id=contract_id,
             order_type=OrderType.STOP, side=leg.side, size=leg.size,
             stop_price=leg.stop_price, custom_tag=leg.custom_tag,
+            stop_loss_ticks=sl_ticks, take_profit_ticks=tp_ticks,
         )
         leg.order_id = res.order_id
         return res

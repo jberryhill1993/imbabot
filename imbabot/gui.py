@@ -240,10 +240,18 @@ class ImbabotGUI:
         root.configure(bg=BG)
         root.minsize(920, 740)
         root.update_idletasks()
-        w, h = 1000, 800
+        # Restore (un-maximized) size — taller so the control bar + log fit.
+        w, h = 1060, 940
         x = max(0, (root.winfo_screenwidth() - w) // 2)
         y = max(0, (root.winfo_screenheight() - h) // 3)
         root.geometry(f"{w}x{h}+{x}+{y}")
+        # Open maximized on first launch so Connect + the activity log show without
+        # resizing. Skip in the headless screenshot path. (Restore size above stays.)
+        if shot_path is None:
+            try:
+                root.state("zoomed")
+            except Exception:
+                pass
 
         if shot_path is None and not self._show_disclaimer():
             root.destroy()
@@ -327,7 +335,8 @@ class ImbabotGUI:
         # inputs
         st.configure("TEntry", fieldbackground="#06141d", foreground=FG, insertcolor=FG,
                      bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=6)
-        st.map("TEntry", bordercolor=[("focus", ACCENT)])
+        st.map("TEntry", bordercolor=[("focus", ACCENT)],
+               foreground=[("disabled", MUTED)], fieldbackground=[("disabled", BG)])
         st.configure("TCombobox", fieldbackground="#06141d", background=SURFACE, foreground=FG,
                      arrowcolor=MUTED, bordercolor=BORDER, padding=5)
         st.map("TCombobox", fieldbackground=[("readonly", "#06141d")], foreground=[("readonly", FG)])
@@ -446,8 +455,6 @@ class ImbabotGUI:
         self.btn_panic.pack(side="right")
         self.btn_flatten = ttk.Button(ctrl, text="▽  FLATTEN", command=self._on_flatten, style="Warning.TButton")
         self.btn_flatten.pack(side="right", padx=(0, 10))
-        self.btn_breakeven = ttk.Button(ctrl, text="⤢  BREAK-EVEN", command=self._on_breakeven, style="Ghost.TButton")
-        self.btn_breakeven.pack(side="right", padx=(0, 10))
 
         # ===== settings notebook =====
         nb = ttk.Notebook(root)
@@ -540,19 +547,39 @@ class ImbabotGUI:
         self.var_sl = tk.StringVar(value=str(self.settings.stop_loss_points))
         self.var_tp = tk.StringVar(value=str(self.settings.take_profit_points))
         self.var_contracts = tk.StringVar(value=str(self.settings.contracts))
-        self._sfield(tab, "Entry points (±)", self.var_points, 3, width=8)
-        self._sfield(tab, "Stop-loss points", self.var_sl, 4, width=8)
-        self._sfield(tab, "Take-profit points (0 = none)", self.var_tp, 5, width=8)
-        self._sfield(tab, "Contracts", self.var_contracts, 6, width=8)
+        # Required fields are highlighted (green/bold ✓).
+        self._sfield(tab, "✓ Entry points (±)", self.var_points, 3, width=8, style="Req.TLabel")
+        self._sfield(tab, "✓ Contracts", self.var_contracts, 6, width=8, style="Req.TLabel")
+        # Stop-loss / Take-profit are platform-managed by default: the label is an
+        # ENABLE checkbox; ticking it un-grays the field and the bot attaches that
+        # bracket instead of TopStep.
+        self.var_bot_sl = tk.BooleanVar(value=self.settings.bot_stop_loss)
+        self.var_bot_tp = tk.BooleanVar(value=self.settings.bot_take_profit)
+        ttk.Checkbutton(tab, text="Stop-loss points (bot-managed)", variable=self.var_bot_sl,
+                        command=self._on_bracket_toggle, style="S.TCheckbutton").grid(
+                        row=4, column=0, sticky="w", padx=(0, 8), pady=5)
+        self.ent_sl = ttk.Entry(tab, textvariable=self.var_sl, width=8, font=(FONT, 11))
+        self.ent_sl.grid(row=4, column=1, sticky="w", pady=5)
+        ttk.Checkbutton(tab, text="Take-profit points (bot-managed)", variable=self.var_bot_tp,
+                        command=self._on_bracket_toggle, style="S.TCheckbutton").grid(
+                        row=5, column=0, sticky="w", padx=(0, 8), pady=5)
+        self.ent_tp = ttk.Entry(tab, textvariable=self.var_tp, width=8, font=(FONT, 11))
+        self.ent_tp.grid(row=5, column=1, sticky="w", pady=5)
+        self._on_bracket_toggle()    # set initial grayed/enabled state from settings
 
         self.var_mode = tk.StringVar(value=self.settings.trade_mode)
         ttk.Label(tab, text="Mode", style="Hs.TLabel").grid(row=3, column=2, sticky="w", padx=(28, 0))
         ttk.Radiobutton(tab, text="Semi-Auto (you manage)", variable=self.var_mode, value="semi_auto",
                         style="S.TRadiobutton").grid(row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="One-Trade (auto OCO)", variable=self.var_mode, value="one_trade",
-                        style="S.TRadiobutton").grid(row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Radiobutton(tab, text="One-Trade (auto OCO)  ✓ recommended", variable=self.var_mode,
+                        value="one_trade", style="Req.TRadiobutton").grid(
+                        row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
         ttk.Radiobutton(tab, text="Two-Trade (leave both in)", variable=self.var_mode, value="two_trade",
                         style="S.TRadiobutton").grid(row=6, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        ttk.Label(tab, text="Stop-loss / Take-profit are handled by TopStep (Position Brackets) by "
+                            "default. Tick a box to let the BOT manage that bracket instead — only if "
+                            "your TopStep account is in Auto OCO Brackets mode (not Position Brackets).",
+                  style="Hint.TLabel", wraplength=520).grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
         self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
         ttk.Checkbutton(tab, text="Use live data feed", variable=self.var_live_data,
@@ -603,6 +630,11 @@ class ImbabotGUI:
                             "then; or click ‘Fire TEST now’. DISARM or this button cancels it. Honors dry-run.",
                   style="Hint.TLabel", wraplength=840).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
+    def _on_bracket_toggle(self) -> None:
+        """Gray/un-gray the SL/TP entries to match their 'bot-managed' checkboxes."""
+        self.ent_sl.configure(state="normal" if self.var_bot_sl.get() else "disabled")
+        self.ent_tp.configure(state="normal" if self.var_bot_tp.get() else "disabled")
+
     def _surface(self, tab):
         """Register surface-bg variants of styles used inside notebook tabs (once)."""
         st = self.st
@@ -614,9 +646,13 @@ class ImbabotGUI:
         st.map("S.TCheckbutton", background=[("active", SURFACE)], indicatorcolor=[("selected", ACCENT)])
         st.configure("S.TRadiobutton", background=SURFACE, foreground=FG, font=(FONT, 10))
         st.map("S.TRadiobutton", background=[("active", SURFACE)], indicatorcolor=[("selected", ACCENT)])
+        # Highlight styles for the REQUIRED settings (entry / contracts / one-trade).
+        st.configure("Req.TLabel", background=SURFACE, foreground=GREEN_H, font=(FONT, 10, "bold"))
+        st.configure("Req.TRadiobutton", background=SURFACE, foreground=GREEN_H, font=(FONT, 10, "bold"))
+        st.map("Req.TRadiobutton", background=[("active", SURFACE)], indicatorcolor=[("selected", GREEN_H)])
 
-    def _sfield(self, parent, label, var, r, c=0, width=18, show=None):
-        ttk.Label(parent, text=label, style="Sm.TLabel").grid(row=r, column=c, sticky="w", padx=(0, 8), pady=5)
+    def _sfield(self, parent, label, var, r, c=0, width=18, show=None, style="Sm.TLabel"):
+        ttk.Label(parent, text=label, style=style).grid(row=r, column=c, sticky="w", padx=(0, 8), pady=5)
         ent = ttk.Entry(parent, textvariable=var, width=width, font=(FONT, 11))
         if show:
             ent.configure(show=show)
@@ -646,6 +682,8 @@ class ImbabotGUI:
             s.stop_loss_points = float(self.var_sl.get())
             s.take_profit_points = float(self.var_tp.get())
             s.contracts = int(self.var_contracts.get())
+            s.bot_stop_loss = bool(self.var_bot_sl.get())
+            s.bot_take_profit = bool(self.var_bot_tp.get())
             s.trade_mode = self.var_mode.get()
             s.use_live_data = bool(self.var_live_data.get())
             s.dry_run = bool(self.var_dry.get())
@@ -995,15 +1033,6 @@ class ImbabotGUI:
             messagebox.showinfo("Connect first", "Connect before flattening.")
             return
         threading.Thread(target=self.engine.flatten_all, daemon=True).start()
-
-    def _on_breakeven(self) -> None:
-        if self.var_backend.get() == "browser":
-            messagebox.showinfo("API only", "Break-even is available on the API backend only.")
-            return
-        if not self.engine:
-            messagebox.showinfo("Connect first", "Connect before using break-even.")
-            return
-        threading.Thread(target=self.engine.break_even, daemon=True).start()
 
     def _on_test_toggle(self) -> None:
         if self.var_test_mode.get():

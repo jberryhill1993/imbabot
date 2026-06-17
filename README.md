@@ -327,8 +327,7 @@ browser backend, which *does* require the chart open and the stop selected.
 
 **Trade modes:** *Semi-Auto* (you manage both orders), *One-Trade* (auto-cancels the
 opposite entry on a fill), and *Two-Trade* (leaves both working — set your platform
-**trade limit to 2/day** so both can fill). The **Break-even** button moves a filled
-position's protective stop to its entry price.
+**trade limit to 2/day** so both can fill).
 
 ## Safety net (do this)
 
