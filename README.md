@@ -22,18 +22,27 @@ backends**:
 
 ## What it does
 
-1. A few seconds before 09:30 ET (default **09:29:57**) it captures a reference price.
-2. It places two **stop-entry** orders:
+1. A few seconds before 09:30 ET (default **09:29:57**), or at a custom time you
+   schedule, it captures a reference price.
+2. It places **exactly two** stop-entry orders — nothing else:
    - **BUY stop** `entry_points` above the reference (long breakout)
    - **SELL stop** `entry_points` below the reference (short breakout)
-   - each with an attached **stop-loss** and **take-profit** bracket.
-3. Mode controls what happens next:
+
+   By default these are **naked** entries: TopStep's **Position Brackets** attach your
+   stop-loss / take-profit to the position the instant a leg fills. (You can opt into
+   **bot-managed** SL/TP brackets per field on the Strategy tab — see
+   [Strategy tab](#strategy-tab--what-to-fill-in).)
+3. Mode controls what happens after a fill:
    - **Semi-Auto** — both orders are placed; *you* manage/cancel them.
    - **One-Trade** — whichever side fills first stays; the bot **cancels the other
      entry automatically** (one-cancels-the-other).
-4. An **Emergency Stop** cancels all working orders and flattens all positions.
+   - **Two-Trade** — both entries stay working (either/both can fill); set your
+     platform **trade limit to 2/day**.
+4. **Flatten** closes open positions but leaves working orders + any armed schedule
+   intact; **Emergency Stop** cancels all working orders, flattens everything, and
+   disarms.
 
-Defaults: `MNQ` (Micro Nasdaq), ±12 points, 2 contracts, **dry-run ON**.
+Defaults: `MNQ` (Micro Nasdaq), ±12 points, 2 contracts, Semi-Auto, **dry-run ON**.
 
 ---
 
@@ -80,7 +89,7 @@ pip install -r requirements.txt
 ```bash
 python -m imbabot.cli selftest
 ```
-You should see `28 passed, 0 failed`.
+You should see `62 passed, 0 failed`.
 
 ### 4. Run the GUI
 ```bash
@@ -94,14 +103,33 @@ first sessions and watch it work.
 
 ## Daily routine (mirrors the guide)
 
-1. Launch Imbabot; **Connect**.
-2. Pick the **account** and **symbol**; click **Resolve** to confirm the contract.
-3. Set **points / contracts / mode**, click **Save**. Match your TopstepX risk
-   settings to your contract count.
+1. Launch Imbabot; **Connect** (this resolves your contract automatically).
+2. Pick the **account** and **symbol**. (Changing the symbol and clicking **Save
+   settings** re-resolves and updates the contract label.)
+3. Set **points / contracts / mode**, click **Save settings**. Match your TopstepX
+   risk settings to your contract count.
 4. Check the dashboard (last price, overnight range, countdown).
-5. **Arm.** It captures price at 09:29:57 and places orders; a countdown shows the
-   next fire time so it can't trigger early.
-6. Emergency Stop is always one click away.
+5. **Arm.** It captures price at 09:29:57 and places the two entries; a countdown
+   shows the next fire time so it can't trigger early.
+6. Flatten and Emergency Stop are always one click away.
+
+### Strategy tab — what to fill in
+The **required** settings are highlighted (green/✓): **Entry points**, **Contracts**,
+and the **One-Trade** mode. **Stop-loss** and **Take-profit** are **grayed out** by
+default because TopStep's Position Brackets handle them — tick the checkbox next to
+either to let the **bot** manage that bracket instead (only if your TopStep account
+is in *Auto OCO Brackets* mode, not Position Brackets).
+
+### Scheduling (auto-fire)
+- **Daily (production):** on the Strategy tab, enter a time in **`HH:MM:SS` 24-hour,
+  your computer's local clock** (e.g. `08:31:00`) and click **Save & arm daily
+  (Mon–Fri)**. The bot stays armed and fires at that time **every weekday**,
+  re-arming itself after each fire, until you cancel/disarm. Weekends are skipped;
+  **market holidays are not** — disarm on those days.
+- **One-shot (test):** the **Test** tab fires once at a custom local time (or **Fire
+  TEST now**), honoring dry-run. Use a SIM/practice account.
+
+Both schedules use your **computer's clock** — TopStep's API exposes no server clock.
 
 ---
 
@@ -279,12 +307,16 @@ Settings live in a JSON file in your OS config dir (the GUI writes it for you):
 |-----|---------|---------|
 | `contract_symbol` | `MNQ` | Instrument to trade |
 | `entry_points` | `12` | Distance above/below reference for the two entries |
-| `stop_loss_points` | `12` | *Informational only* — SL is set on TopStep (Position Brackets) |
-| `take_profit_points` | `12` | *Informational only* — TP is set on TopStep (Position Brackets) |
+| `stop_loss_points` | `12` | Stop distance — used **only** when `bot_stop_loss` is on (else TopStep owns the SL) |
+| `take_profit_points` | `12` | Target distance — used **only** when `bot_take_profit` is on (else TopStep owns the TP) |
+| `bot_stop_loss` | `false` | `true` = bot attaches its own stop bracket (needs Auto OCO Brackets on TopStep) |
+| `bot_take_profit` | `false` | `true` = bot attaches its own target bracket (needs Auto OCO Brackets on TopStep) |
 | `contracts` | `2` | Size per leg |
 | `trade_mode` | `semi_auto` | `semi_auto`, `one_trade`, or `two_trade` |
-| `open_hour` / `open_minute` | `9` / `30` | Cash open (ET) |
+| `open_hour` / `open_minute` | `9` / `30` | Cash open (ET) — used when no `strategy_fire_time` is set |
 | `capture_offset_seconds` | `3` | Capture price this many seconds before the open |
+| `strategy_fire_time` | `""` | Daily weekday fire time (`HH:MM:SS`, local clock). Empty = use the 09:30 open |
+| `test_mode` / `test_fire_time` | `false` / `""` | One-shot custom-time fire (Test tab), local clock |
 | `use_live_data` | `false` | `false` = sim data subscription |
 | `dry_run` | `true` | **`true` = never sends orders** |
 | `max_contracts` | `5` | Hard client-side size cap |
@@ -301,12 +333,15 @@ For the **API backend** (the recommended path), set these up on TopstepX once:
 
 - **API access enabled + an API key** — the paid ProjectX add-on. Stored in your
   OS keychain, never in the settings file.
-- **"Position Brackets" mode enabled**, with your **Stop-Loss / Take-Profit set on
-  TopStep**. The bot places only the two naked entry stops (one BUY above, one SELL
-  below); when a leg fills, TopStep attaches your configured SL/TP to the position.
-  *Do not use "Auto OCO Brackets" mode* — the bot no longer sends per-order brackets,
-  so in that mode a fill would be unprotected. (Earlier builds attached brackets and
-  required Auto OCO; that produced four resting orders and is no longer how it works.)
+- **"Position Brackets" mode enabled** (the default, recommended path), with your
+  **Stop-Loss / Take-Profit set on TopStep**. The bot places only the two naked entry
+  stops (one BUY above, one SELL below); when a leg fills, TopStep attaches your
+  configured SL/TP to the position. In this mode, do **not** also enable the bot's own
+  brackets (`bot_stop_loss` / `bot_take_profit`) — a naked-entry fill is protected by
+  TopStep. *(Only if you instead enable the bot's brackets on the Strategy tab do you
+  switch TopStep to **Auto OCO Brackets** mode; mixing bot brackets with Position
+  Brackets is rejected, and earlier builds that always attached brackets produced four
+  resting orders.)*
 - A **tradable account** (`canTrade = true`) that **allows automation** — Trading
   Combine, Practice, or Funded-eval. Automation is **prohibited on a Live Funded**
   account.
@@ -362,8 +397,9 @@ imbabot/
 tests/           run_all.py + API-client, browser-mock, browser-controller suites
 ```
 
-Run everything with `python tests/run_all.py`. Coverage (61 checks):
-- `imbabot.cli selftest` — 28 offline engine checks (strategy, OCO, risk, panic).
+Run everything with `python tests/run_all.py`. Coverage (95 checks):
+- `imbabot.cli selftest` — 62 offline engine checks (strategy, naked + bot-managed
+  brackets, OCO, weekday/test scheduling, risk, panic, flatten).
 - `tests/test_projectx_client.py` — 4 HTTP request-shaping checks (API layer).
 - `tests/test_browser_mock.py` — 13 checks: the real browser adapter+engine driving
   a headless Chromium through capture→place→fill→cancel→flatten.
@@ -380,8 +416,8 @@ Run everything with `python tests/run_all.py`. Coverage (61 checks):
   requirements; the spec bundles it into the exe).
 - **401 / token expired** → tokens last ~24h; click Connect again.
 - **Position/fill not detected in One-Trade mode** → field names can vary slightly
-  between ProjectX firms; run once in sim and check the log. The per-leg brackets
-  still bound risk even if the opposite-entry cancel is delayed.
+  between ProjectX firms; run once in sim and check the log. TopStep's Position
+  Bracket still protects the filled side even if the opposite-entry cancel is delayed.
 - **Orders rejected** → check `canTrade` on the account, contract size vs your risk
   settings, and that the market is open.
 
