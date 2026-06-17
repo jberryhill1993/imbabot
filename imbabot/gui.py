@@ -571,15 +571,21 @@ class ImbabotGUI:
         ttk.Checkbutton(tab, text="Test mode: fire at a custom time (instead of 9:30)",
                         variable=self.var_test_mode, command=self._on_test_toggle,
                         style="S.TCheckbutton").grid(row=1, column=0, columnspan=3, sticky="w", pady=(10, 6))
-        ttk.Label(tab, text="Fire at (HH:MM:SS, your local time)", style="Sm.TLabel").grid(
+        ttk.Label(tab, text="Fire at (HH:MM:SS) — your computer's clock", style="Sm.TLabel").grid(
             row=2, column=0, sticky="w", pady=5)
         self.var_test_time = tk.StringVar(value=self.settings.test_fire_time)
         ttk.Entry(tab, textvariable=self.var_test_time, width=12, font=(FONT, 11)).grid(row=2, column=1, sticky="w")
         ttk.Button(tab, text="⚡  Fire TEST now", command=self._on_fire_now, style="Warning.TButton").grid(
             row=2, column=2, padx=16)
-        ttk.Label(tab, text="Use a SIM / practice account. With test mode on: Save → Arm and it fires at "
-                            "that time; or click ‘Fire TEST now’. Honors dry-run.",
-                  style="Hint.TLabel", wraplength=840).grid(row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        # Temporary testing aid: save the time and schedule the bot to auto-fire at it.
+        self.btn_autofire = ttk.Button(tab, text="💾  Save & schedule auto-fire",
+                                       command=self._on_schedule_autofire, style="Success.TButton")
+        self.btn_autofire.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Label(tab, text="Use a SIM / practice account. The bot fires off your computer's clock "
+                            "(the Windows taskbar time — NOT the chart's UTC-5). Enter a time, click "
+                            "Save & schedule, and it auto-fires then; or click ‘Fire TEST now’. "
+                            "DISARM or this button cancels it. Honors dry-run.",
+                  style="Hint.TLabel", wraplength=840).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
     def _surface(self, tab):
         """Register surface-bg variants of styles used inside notebook tabs (once)."""
@@ -782,6 +788,59 @@ class ImbabotGUI:
         except Exception as exc:
             messagebox.showerror("Arm refused", str(exc))
             self.log(f"Arm refused: {exc}", "error")
+
+    def _on_schedule_autofire(self) -> None:
+        """Temporary test aid: lock in the Test-tab time and arm the bot so it
+        auto-fires at that local clock time. Reuses the normal arm/FireTimer
+        path, so at the target second it runs the same fire sequence as
+        'Fire TEST now'. A second click cancels (disarms)."""
+        from .scheduler import parse_hms, next_local_fire
+
+        if self.engine is None:
+            messagebox.showinfo("Connect first", "Connect before scheduling auto-fire.")
+            return
+        # Toggle off: if already armed, this button cancels the schedule.
+        if self.engine.armed:
+            self.engine.disarm()
+            self.btn_arm.configure(text="ARM", style="Success.TButton")
+            self.btn_autofire.configure(text="💾  Save & schedule auto-fire")
+            self.log("Auto-fire cancelled (disarmed).", "warn")
+            return
+        # Validate the time before touching anything.
+        raw = self.var_test_time.get().strip()
+        try:
+            parse_hms(raw)
+        except ValueError as exc:
+            messagebox.showerror("Invalid time", f"Use HH:MM or HH:MM:SS (your computer's clock).\n\n{exc}")
+            return
+        # Lock it in: test mode on + save, then push settings to the engine.
+        self.var_test_mode.set(True)
+        s = self._collect_settings()
+        if not s:
+            return
+        s.save()
+        self.engine.settings = s
+        self.engine.risk.settings = s
+        if not s.dry_run:
+            if not messagebox.askyesno(
+                "Schedule LIVE auto-fire?",
+                f"Auto-fire in LIVE mode at {raw} (your computer's clock)?\n\n"
+                f"{s.contract_symbol}  ±{s.entry_points}pt  x{s.contracts}  mode={s.trade_mode}\n\n"
+                "Real orders will be sent at that time.",
+                icon="warning", default="no",
+            ):
+                return
+        try:
+            self.engine.arm(on_tick=None)
+        except Exception as exc:
+            messagebox.showerror("Schedule refused", str(exc))
+            self.log(f"Auto-fire schedule refused: {exc}", "error")
+            return
+        self.btn_arm.configure(text="DISARM", style="Warning.TButton")
+        self.btn_autofire.configure(text="✖  Cancel auto-fire")
+        fire = next_local_fire(raw)
+        self.log(f"Auto-fire scheduled for {fire.strftime('%H:%M:%S')} "
+                 "(your computer's local clock) — it will fire automatically.")
 
     def _on_arm_browser(self) -> None:
         if self.controller is None:
@@ -992,6 +1051,12 @@ class ImbabotGUI:
             self.lbl_fire.configure(text=d_fire.strftime("%H:%M:%S"))
             self.lbl_count.configure(text=format_countdown(seconds_until(d_fire)))
             self._refresh_badges()
+            # Keep the Test-tab auto-fire button label in sync with armed state,
+            # so disarming from the main control bar updates it too.
+            btn = getattr(self, "btn_autofire", None)
+            if btn is not None and self.engine is not None:
+                btn.configure(text="✖  Cancel auto-fire" if self.engine.armed
+                              else "💾  Save & schedule auto-fire")
         except Exception:
             pass
         self.root.after(1000, self._tick_countdown)
