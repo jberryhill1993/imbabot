@@ -728,7 +728,9 @@ class ImbabotGUI:
             self.engine.settings = s
             self.engine.risk.settings = s
             try:
-                self.engine.refresh_contract()
+                c = self.engine.refresh_contract()
+                self.lbl_contract.configure(
+                    text=f"{c.name} ({c.id})  tick={c.tick_size} ${c.tick_value}/tick")
             except Exception as exc:
                 self.log(f"contract refresh failed: {exc}", "warn")
         self._update_mode_banner()
