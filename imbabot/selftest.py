@@ -112,6 +112,34 @@ def run_selftest() -> int:
     _check("engine honors test_mode fire time",
            (eng_t.next_fire(now=local_now).hour, eng_t.next_fire(now=local_now).minute) == (19, 40))
 
+    # 3c) weekday-only recurring schedule (production daily fire). 2026-06-04 is
+    # a Thursday; Fri=06-05, Sat=06-06, next Monday=06-08.
+    from imbabot.scheduler import next_weekday_local_fire
+    thursday = local_now
+    friday = datetime(2026, 6, 5, 12, 0, 0, tzinfo=timezone(_td(hours=-5)))
+    saturday = datetime(2026, 6, 6, 12, 0, 0, tzinfo=timezone(_td(hours=-5)))
+    wf_same = next_weekday_local_fire("19:40", now=thursday)
+    _check("weekday fire later today stays today (Thu)",
+           wf_same.date() == thursday.date() and wf_same.weekday() == 3)
+    wf_fri = next_weekday_local_fire("06:00", now=friday)        # 06:00 passed Fri -> Mon
+    _check("weekday fire after Fri rolls to Monday",
+           wf_fri.weekday() == 0 and (wf_fri.hour, wf_fri.minute) == (6, 0))
+    wf_sat = next_weekday_local_fire("19:00", now=saturday)      # Sat -> Mon
+    _check("weekday fire on Saturday rolls to Monday", wf_sat.weekday() == 0)
+
+    eng_w, _ = make_engine(strategy_fire_time="08:31:00")
+    nfw = eng_w.next_fire(now=friday)                            # Fri 12:00 -> Mon 08:31
+    _check("engine uses weekday schedule (Mon 08:31)",
+           nfw.weekday() == 0 and (nfw.hour, nfw.minute) == (8, 31))
+    eng_wt, _ = make_engine(test_mode=True, test_fire_time="19:40", strategy_fire_time="08:31:00")
+    _check("test_mode overrides weekday schedule",
+           (eng_wt.next_fire(now=local_now).hour, eng_wt.next_fire(now=local_now).minute) == (19, 40))
+    eng_r, _ = make_engine(strategy_fire_time="08:31:00", dry_run=True)
+    eng_r.arm(on_tick=None)
+    _check("daily schedule sets recurring flag", eng_r._recurring is True)
+    eng_r.disarm()
+    _check("disarm clears recurring flag", eng_r._recurring is False)
+
     # 4) dry-run fire places nothing
     eng, fake = make_engine(dry_run=True, trade_mode="one_trade")
     eng._on_fire()

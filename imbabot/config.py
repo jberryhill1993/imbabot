@@ -74,6 +74,11 @@ class Settings:
     test_mode: bool = False           # if True, fire at test_fire_time instead of the 09:30 open
     test_fire_time: str = ""          # "HH:MM" or "HH:MM:SS" in YOUR local time
 
+    # --- production daily schedule (recurring, weekday-only) ---
+    # If set, the bot fires at this local wall-clock time every weekday (Mon–Fri)
+    # and re-arms itself after each fire. Empty = use the 09:30 open default.
+    strategy_fire_time: str = ""      # "HH:MM:SS" in YOUR local time, or "" to disable
+
     # --- backend selection ---
     backend: str = "api"              # "api" (ProjectX REST) | "browser" (automation)
     browser_driver: str = "selenium"  # "selenium" (bundles into the .exe/.app, drives installed Chrome) | "playwright"

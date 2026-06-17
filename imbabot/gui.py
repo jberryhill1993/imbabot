@@ -562,6 +562,22 @@ class ImbabotGUI:
         ttk.Button(tab, text="Save settings", command=self._on_save, style="Accent.TButton").grid(
             row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
+        # --- Production daily auto-fire (recurring, weekday-only) ---
+        ttk.Separator(tab).grid(row=9, column=0, columnspan=5, sticky="ew", pady=(14, 6))
+        ttk.Label(tab, text="Fire daily at (HH:MM:SS, 24-hour) — Mon–Fri, your computer's clock",
+                  style="Hs.TLabel").grid(row=10, column=0, columnspan=5, sticky="w")
+        self.var_strategy_time = tk.StringVar(value=self.settings.strategy_fire_time)
+        ttk.Entry(tab, textvariable=self.var_strategy_time, width=12, font=(FONT, 11)).grid(
+            row=11, column=0, sticky="w", pady=6)
+        self.btn_strategy_sched = ttk.Button(tab, text="💾  Save & arm daily (Mon–Fri)",
+                                             command=self._on_schedule_strategy, style="Success.TButton")
+        self.btn_strategy_sched.grid(row=11, column=1, columnspan=2, sticky="w", padx=8)
+        ttk.Label(tab, text="Type a time and click Save & arm daily: the bot stays armed and fires at "
+                            "that time every weekday, re-arming itself (8:31 AM = 08:31:00). Fires real "
+                            "orders when DRY-RUN is off. DISARM or this button cancels. Holidays are NOT "
+                            "skipped — disarm on holidays.",
+                  style="Hint.TLabel", wraplength=860).grid(row=12, column=0, columnspan=5, sticky="w", pady=(8, 0))
+
     def _build_tab_test(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
         nb.add(tab, text="Test")
@@ -622,6 +638,7 @@ class ImbabotGUI:
             s.chrome_channel = "chrome" if self.var_use_chrome.get() else "chromium"
             s.test_mode = bool(self.var_test_mode.get())
             s.test_fire_time = self.var_test_time.get().strip()
+            s.strategy_fire_time = self.var_strategy_time.get().strip()
             s.base_url = self.var_base.get().strip()
             s.username = self.var_user.get().strip()
             s.contract_symbol = self.var_symbol.get().strip().upper()
@@ -855,6 +872,65 @@ class ImbabotGUI:
         self.log(f"Auto-fire scheduled for {fire.strftime('%a %b %d %H:%M:%S')} "
                  "(your computer's local clock) — it will fire automatically.")
 
+    def _on_schedule_strategy(self) -> None:
+        """Production daily schedule: arm the bot to fire at the Strategy-tab time
+        every weekday (Mon–Fri), re-arming itself after each fire. Uses the local
+        computer clock. A second click cancels (disarms)."""
+        from .scheduler import parse_hms, next_weekday_local_fire
+
+        if self.engine is None:
+            messagebox.showinfo("Connect first", "Connect before arming the daily schedule.")
+            return
+        # Toggle off: if already armed, this button cancels the schedule.
+        if self.engine.armed:
+            self.engine.disarm()
+            self.btn_arm.configure(text="ARM", style="Success.TButton")
+            self.btn_strategy_sched.configure(text="💾  Save & arm daily (Mon–Fri)")
+            self.log("Daily schedule cancelled (disarmed).", "warn")
+            return
+        # Validate the time.
+        raw = self.var_strategy_time.get().strip()
+        try:
+            parse_hms(raw)
+        except ValueError as exc:
+            messagebox.showerror("Invalid time", f"Use HH:MM:SS (24-hour, your computer's clock).\n\n{exc}")
+            return
+        # Lock it in: test mode OFF (use the weekday schedule), save, push to engine.
+        self.var_test_mode.set(False)
+        s = self._collect_settings()
+        if not s:
+            return
+        s.save()
+        self.engine.settings = s
+        self.engine.risk.settings = s
+        fire = next_weekday_local_fire(raw)
+        now = datetime.now().astimezone()
+        if fire.date() != now.date():
+            messagebox.showinfo(
+                "First fire",
+                f"{raw} won't run again today — the first fire will be "
+                f"{fire.strftime('%a %b %d at %H:%M:%S')}, then every weekday at {raw}.",
+            )
+        if not s.dry_run:
+            if not messagebox.askyesno(
+                "Arm LIVE daily schedule?",
+                f"Fire LIVE every weekday at {raw} (your computer's clock)?\n\n"
+                f"{s.contract_symbol}  ±{s.entry_points}pt  x{s.contracts}  mode={s.trade_mode}\n\n"
+                "Real orders will be sent automatically each weekday until you DISARM.",
+                icon="warning", default="no",
+            ):
+                return
+        try:
+            self.engine.arm(on_tick=None)
+        except Exception as exc:
+            messagebox.showerror("Schedule refused", str(exc))
+            self.log(f"Daily schedule refused: {exc}", "error")
+            return
+        self.btn_arm.configure(text="DISARM", style="Warning.TButton")
+        self.btn_strategy_sched.configure(text="✖  Cancel daily schedule")
+        self.log(f"Daily auto-fire armed — first fire {fire.strftime('%a %b %d %H:%M:%S')}, "
+                 f"then every weekday at {raw} (your computer's local clock).")
+
     def _on_arm_browser(self) -> None:
         if self.controller is None:
             messagebox.showinfo("Launch first", "Click Launch Browser and log in before arming.")
@@ -1048,7 +1124,8 @@ class ImbabotGUI:
 
     def _tick_countdown(self) -> None:
         try:
-            from .scheduler import seconds_until, format_countdown, next_fire_time, next_local_fire
+            from .scheduler import (seconds_until, format_countdown, next_fire_time,
+                                    next_local_fire, next_weekday_local_fire)
 
             s = self.settings
             d_fire = None
@@ -1060,16 +1137,29 @@ class ImbabotGUI:
                     except Exception:
                         d_fire = None
             if d_fire is None:
+                st = getattr(self, "var_strategy_time", None)
+                st = st.get().strip() if st else ""
+                if st:
+                    try:
+                        d_fire = next_weekday_local_fire(st)
+                    except Exception:
+                        d_fire = None
+            if d_fire is None:
                 d_fire = next_fire_time(s.open_time(), s.capture_offset_seconds, s.market_tz)
             self.lbl_fire.configure(text=d_fire.strftime("%H:%M:%S"))
             self.lbl_count.configure(text=format_countdown(seconds_until(d_fire)))
             self._refresh_badges()
-            # Keep the Test-tab auto-fire button label in sync with armed state,
-            # so disarming from the main control bar updates it too.
+            # Keep the auto-fire button labels in sync with armed state, so
+            # disarming from the main control bar updates them too.
+            armed = self.engine is not None and self.engine.armed
             btn = getattr(self, "btn_autofire", None)
             if btn is not None and self.engine is not None:
-                btn.configure(text="✖  Cancel auto-fire" if self.engine.armed
+                btn.configure(text="✖  Cancel auto-fire" if armed
                               else "💾  Save & schedule auto-fire")
+            btn2 = getattr(self, "btn_strategy_sched", None)
+            if btn2 is not None and self.engine is not None:
+                btn2.configure(text="✖  Cancel daily schedule" if armed
+                               else "💾  Save & arm daily (Mon–Fri)")
         except Exception:
             pass
         self.root.after(1000, self._tick_countdown)

@@ -79,6 +79,23 @@ def next_local_fire(time_str: str, now: Optional[datetime] = None) -> datetime:
     return target
 
 
+def next_weekday_local_fire(time_str: str, now: Optional[datetime] = None) -> datetime:
+    """Next Mon–Fri occurrence of a wall-clock time in the MACHINE's local tz.
+
+    Like ``next_local_fire`` but rolls forward over Saturday/Sunday, so a daily
+    production schedule fires only on weekdays. (Market *holidays* that fall on a
+    weekday are NOT skipped — there's no calendar — so disarm on those days.)
+    """
+    t = parse_hms(time_str)
+    now = now or datetime.now().astimezone()  # local, tz-aware
+    target = now.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    while target.weekday() >= 5:      # Sat=5, Sun=6 -> roll to Monday
+        target += timedelta(days=1)
+    return target
+
+
 def seconds_until(target: datetime, now: Optional[datetime] = None) -> float:
     now = now or datetime.now(target.tzinfo)
     return (target - now).total_seconds()

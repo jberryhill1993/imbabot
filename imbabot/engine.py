@@ -59,6 +59,8 @@ class BotEngine:
         self.last_plan: Optional[StraddlePlan] = None
 
         self._timer: Optional[FireTimer] = None
+        self._recurring = False                      # daily weekday auto-rearm
+        self._on_tick: Optional[Callable[[float], None]] = None
         self._monitor_stop = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
 
@@ -126,6 +128,11 @@ class BotEngine:
             from .scheduler import next_local_fire
 
             return next_local_fire(s.test_fire_time, now=now)
+        if s.strategy_fire_time:
+            # Production daily schedule: recurring, weekday-only, local clock.
+            from .scheduler import next_weekday_local_fire
+
+            return next_weekday_local_fire(s.strategy_fire_time, now=now)
         return next_fire_time(
             s.open_time(),
             capture_offset_seconds=s.capture_offset_seconds,
@@ -196,6 +203,9 @@ class BotEngine:
             raise RuntimeError("Connect (account + contract) before arming.")
         self.risk.check_can_arm(self.account.can_trade)
 
+        # Recurring daily schedule re-arms itself after each weekday fire.
+        self._recurring = bool(self.settings.strategy_fire_time and not self.settings.test_mode)
+        self._on_tick = on_tick
         fire = self.next_fire()
         self.log(
             f"ARMED. Fire at {fire.strftime('%Y-%m-%d %H:%M:%S %Z')} "
@@ -203,17 +213,43 @@ class BotEngine:
             f"{self.settings.open_hour:02d}:{self.settings.open_minute:02d} open). "
             f"Mode={self.settings.trade_mode} dry_run={self.settings.dry_run}."
         )
+        if self._recurring:
+            self.log(
+                "Daily schedule: stays armed and re-fires every weekday (Mon–Fri) "
+                "at this time. Market holidays are NOT skipped — disarm on holidays.",
+                "warn",
+            )
         if self.settings.trade_mode == TradeMode.TWO_TRADE.value:
             self.log(
                 "Two-Trade mode: both entries stay working (no auto-cancel). "
                 "Set your TopStep trade limit to 2/day so both legs can fill.",
                 "warn",
             )
-        self._timer = FireTimer(target=fire, on_fire=self._on_fire, on_tick=on_tick)
+        callback = self._on_scheduled_fire if self._recurring else self._on_fire
+        self._timer = FireTimer(target=fire, on_fire=callback, on_tick=on_tick)
         self._timer.arm()
         return fire
 
+    def _on_scheduled_fire(self) -> None:
+        """Recurring-schedule callback: fire, then re-arm for the next weekday.
+
+        Runs on the just-fired FireTimer thread (which then exits). We replace
+        ``self._timer`` with a brand-new FireTimer, so ``armed`` stays True with
+        no gap. ``disarm()`` clears ``self._recurring`` first, so a disarm during
+        a fire won't re-arm."""
+        self._on_fire()
+        if not self._recurring:
+            return
+        try:
+            fire = self.next_fire()
+            self._timer = FireTimer(target=fire, on_fire=self._on_scheduled_fire, on_tick=self._on_tick)
+            self._timer.arm()
+            self.log(f"Re-armed for next weekday fire: {fire.strftime('%a %b %d %H:%M:%S')}.")
+        except Exception as exc:
+            self.log(f"re-arm failed: {exc} — daily schedule stopped, re-arm manually.", "error")
+
     def disarm(self) -> None:
+        self._recurring = False          # stop recurrence before cancelling the timer
         if self._timer:
             self._timer.disarm()
             self._timer = None
@@ -384,6 +420,7 @@ class BotEngine:
     def emergency_stop(self) -> None:
         """Panic: disarm, cancel ALL working orders, flatten ALL positions."""
         self.log("EMERGENCY STOP engaged.", "warn")
+        self._recurring = False          # never re-arm after a panic
         self._monitor_stop.set()
         if self._timer:
             self._timer.disarm()
