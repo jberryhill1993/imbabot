@@ -238,20 +238,14 @@ class ImbabotGUI:
 
         root.title(f"Imbabot {__version__}")
         root.configure(bg=BG)
-        root.minsize(920, 740)
+        root.minsize(980, 600)
         root.update_idletasks()
-        # Restore (un-maximized) size — taller so the control bar + log fit.
-        w, h = 1060, 940
+        # Initial size; _fit_window() (after widgets build) snaps it to the content
+        # so everything shows without maximizing.
+        w, h = 1060, 860
         x = max(0, (root.winfo_screenwidth() - w) // 2)
         y = max(0, (root.winfo_screenheight() - h) // 3)
         root.geometry(f"{w}x{h}+{x}+{y}")
-        # Open maximized on first launch so Connect + the activity log show without
-        # resizing. Skip in the headless screenshot path. (Restore size above stays.)
-        if shot_path is None:
-            try:
-                root.state("zoomed")
-            except Exception:
-                pass
 
         if shot_path is None and not self._show_disclaimer():
             root.destroy()
@@ -260,6 +254,8 @@ class ImbabotGUI:
         self._build_styles()
         self._build_widgets()
         self._load_into_widgets()
+        if shot_path is None:
+            self._fit_window()
         self.root.after(150, self._drain_events)
         self.root.after(1000, self._tick_countdown)
         self.log(f"Imbabot {__version__} ready. Config: {log_path().parent}")
@@ -463,26 +459,58 @@ class ImbabotGUI:
         self._build_tab_strategy(nb)
         self._build_tab_test(nb)
 
-        # ===== log =====
-        logwrap = ttk.Frame(root, style="Surface.TFrame", padding=10)
-        logwrap.pack(fill="both", expand=True, padx=20, pady=(0, 16))
-        topbar = ttk.Frame(logwrap, style="Surface.TFrame")
-        topbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        ttk.Label(topbar, text="ACTIVITY LOG", background=SURFACE, foreground=MUTED,
-                  font=(FONT, 9, "bold")).pack(side="left")
+        # ===== log (collapsible) =====
+        self._logwrap = ttk.Frame(root, style="Surface.TFrame", padding=10)
+        self._logwrap.pack(fill="x", expand=False, padx=20, pady=(0, 16))
+        topbar = ttk.Frame(self._logwrap, style="Surface.TFrame")
+        topbar.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self.btn_log_toggle = ttk.Button(topbar, text="▸  Activity log",
+                                         command=self._toggle_log, style="Ghost.TButton")
+        self.btn_log_toggle.pack(side="left")
         ttk.Button(topbar, text="Save log…", command=self._on_save_log, style="Ghost.TButton").pack(side="right")
-        self.txt = tk.Text(logwrap, height=9, wrap="word", relief="flat", borderwidth=0,
+        self.txt = tk.Text(self._logwrap, height=9, wrap="word", relief="flat", borderwidth=0,
                            background="#06141d", foreground=FG, insertbackground=FG,
                            font=(MONO, 10), padx=12, pady=10, highlightthickness=0)
-        self.txt.grid(row=1, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(logwrap, command=self.txt.yview)
-        sb.grid(row=1, column=1, sticky="ns")
-        self.txt.configure(yscrollcommand=sb.set, state="disabled")
-        logwrap.columnconfigure(0, weight=1)
-        logwrap.rowconfigure(1, weight=1)
+        self.txt.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self._log_sb = ttk.Scrollbar(self._logwrap, command=self.txt.yview)
+        self._log_sb.grid(row=1, column=1, sticky="ns", pady=(6, 0))
+        self.txt.configure(yscrollcommand=self._log_sb.set, state="disabled")
+        self._logwrap.columnconfigure(0, weight=1)
+        self._logwrap.rowconfigure(1, weight=1)
+        # collapsed by default — only the toggle bar shows
+        self._log_expanded = False
+        self.txt.grid_remove()
+        self._log_sb.grid_remove()
 
         self._update_mode_banner()
         self._on_backend_change()
+
+    def _toggle_log(self) -> None:
+        """Expand/collapse the activity log; resize the window to match."""
+        self._log_expanded = not self._log_expanded
+        if self._log_expanded:
+            self.txt.grid()
+            self._log_sb.grid()
+            self._logwrap.pack_configure(fill="both", expand=True)
+            self.btn_log_toggle.configure(text="▾  Activity log")
+        else:
+            self.txt.grid_remove()
+            self._log_sb.grid_remove()
+            self._logwrap.pack_configure(fill="x", expand=False)
+            self.btn_log_toggle.configure(text="▸  Activity log")
+        self._fit_window()
+
+    def _fit_window(self) -> None:
+        """Size the window to its natural content (clamped to the screen) so
+        everything shows without maximizing. Re-run when the log expands/collapses."""
+        r = self.root
+        r.update_idletasks()
+        sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+        w = min(max(r.winfo_reqwidth(), 1000), sw - 80)
+        h = min(r.winfo_reqheight() + 6, sh - 80)
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2)
+        r.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build_tab_connect(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
@@ -538,7 +566,6 @@ class ImbabotGUI:
         ttk.Label(tab, text="Symbol", style="Sm.TLabel").grid(row=0, column=2, sticky="w", padx=(16, 0))
         self.var_symbol = tk.StringVar(value=self.settings.contract_symbol)
         ttk.Entry(tab, textvariable=self.var_symbol, width=10, font=(FONT, 11)).grid(row=0, column=3, sticky="w", padx=8)
-        ttk.Button(tab, text="Resolve", command=self._on_resolve, style="Ghost.TButton").grid(row=0, column=4, padx=4)
         self.lbl_contract = ttk.Label(tab, text="—", style="Sm.TLabel")
         self.lbl_contract.grid(row=1, column=0, columnspan=5, sticky="w", pady=(4, 10))
         ttk.Separator(tab).grid(row=2, column=0, columnspan=5, sticky="ew", pady=4)
@@ -797,20 +824,6 @@ class ImbabotGUI:
         self.engine.settings.account_name = acct.name
         self.engine.settings.save()
         self.log(f"Account set to {acct.name} (id={acct.id}).")
-
-    def _on_resolve(self) -> None:
-        if not self.engine:
-            messagebox.showinfo("Connect first", "Connect before resolving a contract.")
-            return
-        self.engine.settings.contract_symbol = self.var_symbol.get().strip().upper()
-        threading.Thread(target=self._resolve_worker, daemon=True).start()
-
-    def _resolve_worker(self) -> None:
-        try:
-            c = self.engine.refresh_contract()
-            self.events.put(("contract", f"{c.name} ({c.id})  tick={c.tick_size} ${c.tick_value}/tick"))
-        except Exception as exc:
-            self.events.put(("error", f"resolve failed: {exc}"))
 
     def _on_arm(self) -> None:
         if self.var_backend.get() == "browser":
@@ -1113,8 +1126,6 @@ class ImbabotGUI:
             self.btn_connect.configure(state="normal")
             self.lbl_conn.configure(text=f"connect failed: {evt[1]}")
             messagebox.showerror("Connection failed", evt[1])
-        elif kind == "contract":
-            self.lbl_contract.configure(text=evt[1])
         elif kind == "dashboard":
             price, rng = evt[1], evt[2]
             self.lbl_price.configure(text=f"{price:,.2f}" if price is not None else "—")
