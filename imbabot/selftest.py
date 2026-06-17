@@ -30,7 +30,7 @@ def run_selftest() -> int:
     tmp = tempfile.mkdtemp(prefix="imbabot-selftest-")
     os.environ["IMBABOT_CONFIG_DIR"] = tmp
 
-    from .models import OrderSide, round_to_tick, points_to_ticks
+    from .models import OrderSide, OrderType, round_to_tick, points_to_ticks
     from .strategy import StrategyParams, build_straddle
     from .scheduler import next_fire_time, seconds_until
     from .config import Settings
@@ -125,22 +125,23 @@ def run_selftest() -> int:
     _check("placed 2 entry legs", len(fake.placed) == 2, f"placed {len(fake.placed)}")
     buy_rec = next(o for o in fake.placed if o["side"] == OrderSide.BUY)
     sell_rec = next(o for o in fake.placed if o["side"] == OrderSide.SELL)
-    _check("long brackets signed (SL<0 / TP>0)",
-           buy_rec["stop_loss_ticks"] < 0 < buy_rec["take_profit_ticks"],
-           f"SL={buy_rec['stop_loss_ticks']} TP={buy_rec['take_profit_ticks']}")
-    _check("short brackets signed (SL>0 / TP<0)",
-           sell_rec["take_profit_ticks"] < 0 < sell_rec["stop_loss_ticks"],
-           f"SL={sell_rec['stop_loss_ticks']} TP={sell_rec['take_profit_ticks']}")
+    _check("BUY entry is a naked STOP above the reference",
+           buy_rec["order_type"] == OrderType.STOP and buy_rec["stop_price"] > 21000.0,
+           f"type={buy_rec.get('order_type')} stop={buy_rec.get('stop_price')}")
+    _check("SELL entry is a naked STOP below the reference",
+           sell_rec["order_type"] == OrderType.STOP and sell_rec["stop_price"] < 21000.0,
+           f"type={sell_rec.get('order_type')} stop={sell_rec.get('stop_price')}")
+    _check("no SL/TP bracket ticks on either entry (platform-managed)",
+           all(o.get("stop_loss_ticks") is None and o.get("take_profit_ticks") is None
+               for o in fake.placed),
+           f"placed={fake.placed}")
 
-    # 5a) TP=0 end-to-end: orders go out with NO takeProfit bracket at all
-    eng, fake = make_engine(dry_run=False, trade_mode="semi_auto", take_profit_points=0)
+    # 5a) OCO end-to-end: a fill cancels the opposite entry; brackets aren't involved
+    eng, fake = make_engine(dry_run=False, trade_mode="one_trade")
     plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
     eng._place_plan(plan)
-    _check("TP=0 -> no TP bracket on any order",
-           all(o.get("take_profit_ticks") is None for o in fake.placed),
-           f"placed={fake.placed}")
-    _check("TP=0 -> SL bracket still present",
-           all(o.get("stop_loss_ticks") not in (None, 0) for o in fake.placed))
+    _check("straddle rests exactly 2 orders (no bracket children)",
+           len(fake.orders) == 2, f"open={list(fake.orders)}")
     long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
     _check("both legs have order ids", long_oid is not None and short_oid is not None)
     fake.simulate_fill(eng.contract.id, +2)            # long side fills
@@ -174,7 +175,7 @@ def run_selftest() -> int:
     _check("semi-auto cancels nothing", fake.cancelled == [])
 
     # 6b) one-sided straddle: if one leg is rejected, the placed leg is KEPT
-    # (its SL/TP bracket bounds the risk platform-side) and a warning logged
+    # (TopStep's Position Bracket bounds the risk on fill) and a warning logged
     eng, fake = make_engine(dry_run=False, trade_mode="semi_auto")
     fake.reject_sides = {OrderSide.SELL}
     plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
@@ -274,6 +275,33 @@ def run_selftest() -> int:
            fake.orders.get(opp.order_id, {}).get("stop_price") == 20988.0)
     _check("break-even used modify (not cancel)", fake.cancelled == [] and len(fake.modified) == 1,
            f"cancelled={fake.cancelled} modified={fake.modified}")
+
+    # 10b) break-even with a PLATFORM-managed stop (no '-SL' tag): finds the
+    # opposite-side STOP for the contract and moves it. (One-Trade: opposite
+    # entry already cancelled, so it's unambiguous.)
+    eng, fake = make_engine(dry_run=False, trade_mode="one_trade")
+    cid = eng.contract.id
+    ts_stop = fake.place_order(account_id=42, contract_id=cid, order_type=OrderType.STOP,
+                               side=OrderSide.SELL, size=1, stop_price=20990.0,
+                               custom_tag="")          # TopStep bracket: no -SL tag
+    fake.simulate_fill(cid, +1, avg_price=21007.3)     # long fill at 21007.3
+    eng.break_even()
+    moved = fake.orders.get(ts_stop.order_id, {})
+    _check("break-even moves platform stop (no -SL tag) to entry tick",
+           moved.get("stop_price") == 21007.25, f"got {moved.get('stop_price')}")
+
+    # 10c) ambiguous: two protective-side STOPs and no '-SL' tag -> refuse to guess
+    eng, fake = make_engine(dry_run=False, trade_mode="two_trade")
+    cid = eng.contract.id
+    fake.place_order(account_id=42, contract_id=cid, order_type=OrderType.STOP,
+                     side=OrderSide.SELL, size=1, stop_price=20990.0, custom_tag="")
+    fake.place_order(account_id=42, contract_id=cid, order_type=OrderType.STOP,
+                     side=OrderSide.SELL, size=1, stop_price=20988.0, custom_tag="")
+    fake.simulate_fill(cid, +1, avg_price=21007.3)
+    eng.break_even()
+    _check("break-even refuses to guess when >1 candidate stop",
+           fake.modified == [] and fake.cancelled == [],
+           f"modified={fake.modified} cancelled={fake.cancelled}")
 
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

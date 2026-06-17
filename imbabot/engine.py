@@ -286,10 +286,10 @@ class BotEngine:
         cid = plan.contract.id
         placed: List = []
         failures: List[str] = []
-        # Attempt every leg even if an earlier one fails: each leg carries its
-        # own SL/TP bracket (held server-side by TopstepX and activated on
-        # fill), so a lone leg is a risk-bounded one-direction breakout trade
-        # — worth keeping per the operator's policy.
+        # Attempt every leg even if an earlier one fails: a lone leg is a
+        # one-direction breakout entry whose risk is bounded by TopStep's
+        # Position Bracket (attached to the position on fill), so it's worth
+        # keeping per the operator's policy.
         for leg in plan.legs:
             try:
                 res = self.client.place_straddle_leg(acct, cid, leg)
@@ -315,9 +315,9 @@ class BotEngine:
                 for leg in placed
             )
             self.log(
-                f"Straddle is ONE-SIDED: keeping {kept}. Its SL/TP bracket is "
-                "active on the platform; cancel manually if you don't want the "
-                "one-direction trade.",
+                f"Straddle is ONE-SIDED: keeping {kept}. TopStep's Position "
+                "Bracket will attach the SL/TP when it fills; cancel manually if "
+                "you don't want the one-direction trade.",
                 "warn",
             )
         self.risk.record_trade()
@@ -338,7 +338,7 @@ class BotEngine:
         filled from the position's direction, we cancel every plan entry that
         is still OPEN in the book — the filled leg is no longer open, so this
         is correct even if the position payload's direction encoding changes.
-        The per-leg brackets bound risk regardless.
+        TopStep's Position Bracket protects the filled side regardless.
         """
         self.log("OCO monitor started (One-Trade mode).")
         acct = self.account.id
@@ -421,9 +421,14 @@ class BotEngine:
         """Move the open position's protective stop to its entry price.
 
         Works off live API state (not last_plan) so it survives a restart. The
-        protective stop is the bracket child the platform created on fill — we
-        identify it by the ``-SL`` suffix the bracket appends to our custom tag,
-        which avoids ever touching a still-working opposite *entry*.
+        bot no longer attaches its own ``-SL`` bracket; the protective stop is
+        TopStep's Position Bracket, attached to the position on fill. We locate
+        it by: (a) any ``-SL``-tagged stop, for back-compat; else (b) an open
+        STOP order on this contract on the side *opposite* the net position
+        (long -> protective SELL, short -> protective BUY). In One-Trade mode the
+        opposite entry has already been cancelled, so this is unambiguous; if
+        more than one candidate is found we refuse to guess and ask the operator
+        to move it on TopStep.
         """
         self.log("BREAK-EVEN requested — moving the protective stop to entry.", "warn")
         if not (self.account and self.contract):
@@ -454,14 +459,34 @@ class BotEngine:
         except Exception as exc:
             self.log(f"order lookup failed: {exc}", "error")
             return
+        # (a) legacy bot-tagged bracket child, if any still exist
         stops = [
             o for o in orders
             if _order_contract(o) == cid and str(_order_tag(o) or "").endswith("-SL")
         ]
+        # (b) fall back to TopStep's Position Bracket: a working STOP on this
+        #     contract on the protective side (opposite the net position).
+        if not stops:
+            protective = OrderSide.SELL.value if net > 0 else OrderSide.BUY.value
+            stops = [
+                o for o in orders
+                if _order_contract(o) == cid
+                and _order_stop(o) is not None
+                and _order_side(o) == protective
+            ]
         if not stops:
             self.log(
-                "No bot-tagged protective stop ('-SL') found for this position. If your "
-                "stop is platform-managed, move it to break-even on TopStep manually.",
+                "No protective stop found for this position. If your stop is "
+                "platform-managed, move it to break-even on TopStep manually.",
+                "error",
+            )
+            return
+        if len(stops) > 1:
+            prices = ", ".join(str(_order_stop(o)) for o in stops)
+            self.log(
+                f"Found {len(stops)} candidate stops on the protective side "
+                f"({prices}); refusing to guess which is the protective stop. "
+                "Move it to break-even on TopStep manually.",
                 "error",
             )
             return
@@ -585,6 +610,17 @@ def _order_tag(o: Dict[str, Any]) -> Optional[str]:
 
 def _order_stop(o: Dict[str, Any]):
     return o.get("stopPrice", o.get("stop_price"))
+
+
+def _order_side(o: Dict[str, Any]) -> Optional[int]:
+    """Order side as an int (0=BUY, 1=SELL), or None if absent."""
+    v = o.get("side")
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _order_contract(o: Dict[str, Any]) -> Optional[str]:

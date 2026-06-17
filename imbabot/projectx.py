@@ -259,20 +259,23 @@ class ProjectXClient:
     def place_straddle_leg(
         self, account_id: int, contract_id: str, leg: StraddleLeg
     ) -> OrderResult:
-        """Place one straddle leg as a STOP entry with attached brackets.
+        """Place one straddle leg as a *naked* STOP entry — no attached brackets.
 
-        Bracket ticks are SIGNED offsets from the fill price (+above / -below),
-        so a long's stop-loss is negative and its target positive; a short is
-        mirrored. (Live-verified 2026-06-09: unsigned ticks are rejected with
-        "Ticks should be less than zero when longing.")
+        The straddle rests exactly two orders: one BUY stop above the reference
+        and one SELL stop below it. We deliberately do NOT send a
+        ``stopLossBracket`` / ``takeProfitBracket`` here: with TopStep's Auto OCO
+        Brackets on, each attached bracket rests as its own working order, and
+        (because the stop distance ~ the entry distance) the long's protective
+        SELL lands on the short's entry and vice-versa — so the book showed FOUR
+        orders at two levels instead of two. (Live-observed 2026-06-16.)
+
+        Protection is now the operator's responsibility on the platform: run the
+        account in **Position Brackets** mode and configure the SL/TP there, so
+        TopStep attaches them to the position the moment a leg fills. The bot
+        only places the entries and (in One-Trade mode) cancels the loser.
+        ``leg.stop_loss_ticks`` / ``leg.take_profit_ticks`` remain on the leg for
+        logging but are intentionally not transmitted.
         """
-        # take_profit_ticks == 0 -> no TP bracket (never rest a limit order)
-        if leg.side == OrderSide.BUY:
-            sl_ticks = -leg.stop_loss_ticks
-            tp_ticks = leg.take_profit_ticks if leg.take_profit_ticks else None
-        else:
-            sl_ticks = leg.stop_loss_ticks
-            tp_ticks = -leg.take_profit_ticks if leg.take_profit_ticks else None
         result = self.place_order(
             account_id=account_id,
             contract_id=contract_id,
@@ -281,8 +284,6 @@ class ProjectXClient:
             size=leg.size,
             stop_price=leg.stop_price,
             custom_tag=leg.custom_tag,
-            stop_loss_ticks=sl_ticks,
-            take_profit_ticks=tp_ticks,
         )
         leg.order_id = result.order_id
         return result

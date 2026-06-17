@@ -279,10 +279,10 @@ Settings live in a JSON file in your OS config dir (the GUI writes it for you):
 |-----|---------|---------|
 | `contract_symbol` | `MNQ` | Instrument to trade |
 | `entry_points` | `12` | Distance above/below reference for the two entries |
-| `stop_loss_points` | `12` | Protective stop distance from fill |
-| `take_profit_points` | `12` | Target distance from fill |
+| `stop_loss_points` | `12` | *Informational only* — SL is set on TopStep (Position Brackets) |
+| `take_profit_points` | `12` | *Informational only* — TP is set on TopStep (Position Brackets) |
 | `contracts` | `2` | Size per leg |
-| `trade_mode` | `semi_auto` | `semi_auto` or `one_trade` |
+| `trade_mode` | `semi_auto` | `semi_auto`, `one_trade`, or `two_trade` |
 | `open_hour` / `open_minute` | `9` / `30` | Cash open (ET) |
 | `capture_offset_seconds` | `3` | Capture price this many seconds before the open |
 | `use_live_data` | `false` | `false` = sim data subscription |
@@ -301,13 +301,24 @@ For the **API backend** (the recommended path), set these up on TopstepX once:
 
 - **API access enabled + an API key** — the paid ProjectX add-on. Stored in your
   OS keychain, never in the settings file.
-- **"Auto OCO Brackets" enabled** in your TopStep trade settings. The bot attaches
-  a per-order stop-loss bracket, which is rejected while the account is in
-  "Position Brackets" mode (*"Brackets cannot be used with Position Brackets"*).
+- **"Position Brackets" mode enabled**, with your **Stop-Loss / Take-Profit set on
+  TopStep**. The bot places only the two naked entry stops (one BUY above, one SELL
+  below); when a leg fills, TopStep attaches your configured SL/TP to the position.
+  *Do not use "Auto OCO Brackets" mode* — the bot no longer sends per-order brackets,
+  so in that mode a fill would be unprotected. (Earlier builds attached brackets and
+  required Auto OCO; that produced four resting orders and is no longer how it works.)
 - A **tradable account** (`canTrade = true`) that **allows automation** — Trading
   Combine, Practice, or Funded-eval. Automation is **prohibited on a Live Funded**
   account.
-- **Risk settings matched to your contract count.**
+- **Risk settings matched to your contract count.** Your *Personal Daily Loss Limit*
+  (PDLL) and *Daily Profit Target* (PDPT) are account-level daily backstops, separate
+  from the per-trade Position Bracket — the bot never touches either.
+
+Sizing the Position Bracket in dollars — **NQ** is **$20 / point** ($5 / tick) per
+contract; **MNQ** is **$2 / point** ($0.50 / tick). So on NQ, a **$500 take-profit =
+25 points (100 ticks)** and a **$300 stop = 15 points (60 ticks)** per contract
+(divide by your contract count if TopStep sizes the bracket per position rather than
+per contract).
 
 **No TopStep screens need to be open.** Orders are placed server-side over the API —
 you don't need the chart, order ticket, or any TopStep window open for the bot to
