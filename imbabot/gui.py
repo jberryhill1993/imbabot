@@ -55,7 +55,7 @@ FONT = "Segoe UI" if sys.platform.startswith("win") else ("Helvetica Neue" if sy
 MONO = "Consolas" if sys.platform.startswith("win") else ("Menlo" if sys.platform == "darwin" else "DejaVu Sans Mono")
 
 DISCLAIMER = (
-    "Imbabot places real futures orders through your TopstepX / ProjectX account.\n\n"
+    "Jbot places real futures orders through your TopstepX / ProjectX account.\n\n"
     "• This is NOT trading or financial advice. You are solely responsible for every "
     "order it places and any losses.\n"
     "• Automated trading is allowed in Topstep Combine/Funded (evaluation) accounts but "
@@ -236,7 +236,7 @@ class ImbabotGUI:
         self._poll_stop = threading.Event()
         self._tick_stop = threading.Event()
 
-        root.title(f"Imbabot {__version__}")
+        root.title(f"Jbot {__version__}")
         root.configure(bg=BG)
         root.minsize(980, 600)
         root.update_idletasks()
@@ -258,7 +258,7 @@ class ImbabotGUI:
             self._fit_window()
         self.root.after(150, self._drain_events)
         self.root.after(1000, self._tick_countdown)
-        self.log(f"Imbabot {__version__} ready. Config: {log_path().parent}")
+        self.log(f"Jbot {__version__} ready. Config: {log_path().parent}")
         if shot_path is None:
             self._start_ticker()
 
@@ -271,7 +271,7 @@ class ImbabotGUI:
         self.lbl_range.configure(text="29478–30201")
         self.lbl_count.configure(text="17:42:09")
         self.lbl_fire.configure(text="09:29:57")
-        for line, lvl in [("Imbabot ready. Backend: API (TopstepX).", "info"),
+        for line, lvl in [("Jbot ready. Backend: API (TopstepX).", "info"),
                           ("Connected · $150K PRACTICE | PRAC-V2", "info"),
                           ("ARMED. Fire at 09:29:57. Mode=semi_auto dry_run=True", "warn")]:
             self.log(line, lvl)
@@ -399,7 +399,7 @@ class ImbabotGUI:
         header.pack(fill="x")
         left = ttk.Frame(header, style="Header.TFrame")
         left.pack(side="left")
-        ttk.Label(left, text="◆ IMBABOT", style="Brand.TLabel").pack(side="left")
+        ttk.Label(left, text="◆ JBOT", style="Brand.TLabel").pack(side="left")
         ttk.Label(left, text=f"   v{__version__}  ·  TopstepX opening-range bot",
                   style="Sub.TLabel").pack(side="left", pady=(8, 0))
         # live NQ ticker — fed by a public quote feed, independent of the API login

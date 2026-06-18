@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Imbabot.app on macOS and package it into release/Imbabot-macOS-arm64.zip
+# Build Jbot.app on macOS and package it into release/Jbot-macOS-arm64.zip
 #
 # Usage (from the project folder):
 #   ./build_macos.sh
@@ -27,11 +27,11 @@ echo "==> Installing dependencies ..."
 echo "==> Running self-test ..."
 "$PY" -m imbabot.cli selftest >/dev/null && echo "    self-test OK"
 
-echo "==> Building Imbabot.app (in $DIST) ..."
+echo "==> Building Jbot.app (in $DIST) ..."
 ( cd "$PROJ" && "$PY" -m PyInstaller imbabot.spec --noconfirm \
     --distpath "$DIST" --workpath "$BUILD" --log-level ERROR )
 
-APP="$DIST/Imbabot.app"
+APP="$DIST/Jbot.app"
 echo "==> Cleaning extended attributes + ad-hoc signing ..."
 xattr -cr "$APP" || true
 xattr -d com.apple.FinderInfo "$APP" 2>/dev/null || true
@@ -40,7 +40,7 @@ codesign --force --deep -s - "$APP"
 codesign --verify --strict "$APP" && echo "    signature OK"
 
 mkdir -p "$PROJ/release"
-ZIP="$PROJ/release/Imbabot-macOS-arm64.zip"
+ZIP="$PROJ/release/Jbot-macOS-arm64.zip"
 echo "==> Packaging -> $ZIP"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
@@ -51,4 +51,4 @@ echo "  App: $APP"
 echo "  Zip: $ZIP"
 echo ""
 echo "First launch on another Mac (unsigned/ad-hoc): right-click the app -> Open,"
-echo "or run:  xattr -dr com.apple.quarantine /path/to/Imbabot.app"
+echo "or run:  xattr -dr com.apple.quarantine /path/to/Jbot.app"

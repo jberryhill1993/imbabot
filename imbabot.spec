@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec — builds Imbabot for the platform it runs on.
+"""PyInstaller spec — builds Jbot for the platform it runs on.
 
-  • Windows  ->  dist/Imbabot.exe        (single-file, double-clickable)
-  • macOS    ->  dist/Imbabot.app        (proper onedir .app bundle)
+  • Windows  ->  dist/Jbot.exe        (single-file, double-clickable)
+  • macOS    ->  dist/Jbot.app        (proper onedir .app bundle)
 
 PyInstaller cannot cross-compile, so build each on its own OS (or use the
 GitHub Actions matrix in .github/workflows/build-exe.yml, which builds both).
@@ -65,18 +65,18 @@ if _is_mac:
     # onedir + .app bundle (the supported macOS GUI layout)
     exe = EXE(
         pyz, a.scripts, [], exclude_binaries=True,
-        name="Imbabot", console=False, strip=False, upx=False, icon=_icon,
+        name="Jbot", console=False, strip=False, upx=False, icon=_icon,
     )
-    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Imbabot")
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Jbot")
     app = BUNDLE(
         coll,
-        name="Imbabot.app",
+        name="Jbot.app",
         icon=_icon,
         bundle_identifier="com.imbabot.app",
         info_plist={
-            "CFBundleName": "Imbabot",
-            "CFBundleDisplayName": "Imbabot",
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleName": "Jbot",
+            "CFBundleDisplayName": "Jbot",
+            "CFBundleShortVersionString": "0.2.0",
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.finance",
         },
@@ -85,7 +85,7 @@ else:
     # Windows / Linux: single-file executable
     exe = EXE(
         pyz, a.scripts, a.binaries, a.datas, [],
-        name="Imbabot", debug=False, bootloader_ignore_signals=False, strip=False,
+        name="Jbot", debug=False, bootloader_ignore_signals=False, strip=False,
         upx=True, runtime_tmpdir=None, console=False,
         disable_windowed_traceback=False, icon=_icon,
     )
