@@ -313,7 +313,7 @@ def cmd_ingest_history(args: argparse.Namespace) -> int:
         print("No trading days with a 09:30 ET open were found. Check the file/timezone.")
         return 1
     print(f"Ingested {len(records)} trading days "
-          f"({records[0].date} → {records[-1].date}).")
+          f"({records[0].date} -> {records[-1].date}).")
     print(f"Cached to {history_path(symbol)}")
     return 0
 
