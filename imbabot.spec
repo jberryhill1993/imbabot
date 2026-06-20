@@ -18,16 +18,21 @@ Notes
 - Playwright is excluded to keep the binary lean; browser mode runs from source.
 - Drop an icon at assets/imbabot.ico (Windows) / assets/imbabot.icns (macOS).
 """
+import importlib.util
 import os
 import sys
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
 
-# tzdata: timezone DB for 09:30 ET scheduling.
-# selenium: the browser backend that drives the user's installed Chrome — including
-#   its bundled selenium-manager binary (a data file) that resolves chromedriver.
-for pkg in ("tzdata", "selenium"):
+# tzdata: timezone DB for 09:30 ET scheduling (always required on a clean machine).
+# selenium: the OPTIONAL browser backend that drives the user's installed Chrome — only
+#   collected if installed, since the API-only straddle bot doesn't need it. When present,
+#   its bundled selenium-manager binary (a data file) that resolves chromedriver is included.
+_bundle = ["tzdata"]
+if importlib.util.find_spec("selenium") is not None:
+    _bundle.append("selenium")
+for pkg in _bundle:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -76,7 +81,7 @@ if _is_mac:
         info_plist={
             "CFBundleName": "Imbabot",
             "CFBundleDisplayName": "Imbabot",
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleShortVersionString": "0.2.0",
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.finance",
         },

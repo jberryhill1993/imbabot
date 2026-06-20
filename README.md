@@ -180,6 +180,10 @@ xattr -dr com.apple.quarantine /path/to/Imbabot.app
 
 ## Sharing it (download links for other people)
 
+> **Sharing via OneDrive instead?** If you hand out a `Imbabot-Download.zip` link rather than a
+> GitHub Release, see [UPDATING.md](UPDATING.md) for the one-command `publish_update.ps1` flow that
+> rebuilds and overwrites that zip in place (same link, no re-share).
+
 Builds are published as **GitHub Release** assets, which give permanent links anyone
 can download:
 
