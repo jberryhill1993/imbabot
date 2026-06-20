@@ -296,6 +296,28 @@ def cmd_probe_history(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_history(args: argparse.Namespace) -> int:
+    """Ingest a FirstRate-style 1-minute CSV into the analyzer's cached DayRecords."""
+    from pathlib import Path
+
+    if not Path(args.csv).exists():
+        print(f"File not found: {args.csv}")
+        return 1
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.csv_history import ingest_csv, history_path
+
+    print(f"Ingesting {args.csv} as {symbol} …")
+    records = ingest_csv(args.csv, symbol, open_minutes=args.open_minutes)
+    if not records:
+        print("No trading days with a 09:30 ET open were found. Check the file/timezone.")
+        return 1
+    print(f"Ingested {len(records)} trading days "
+          f"({records[0].date} → {records[-1].date}).")
+    print(f"Cached to {history_path(symbol)}")
+    return 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     from .selftest import run_selftest
 
@@ -350,6 +372,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("probe-history", help="measure how far back 1-min bars are available")
     sp.add_argument("--live", action="store_true", help="probe the LIVE data feed (not sim)")
     sp.set_defaults(func=cmd_probe_history)
+
+    sp = sub.add_parser("ingest-history", help="ingest a FirstRate 1-min CSV for the analyzer")
+    sp.add_argument("csv", help="path to the FirstRate (or compatible) 1-minute CSV")
+    sp.add_argument("--symbol", help="symbol label for the cache (default: contract_symbol)")
+    sp.add_argument("--open-minutes", type=int, default=15,
+                    help="minutes after the open to keep per day (default 15)")
+    sp.set_defaults(func=cmd_ingest_history)
 
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)
