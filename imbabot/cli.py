@@ -318,6 +318,42 @@ def cmd_ingest_history(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    """Backtest cached history and fit the recommended-spread model."""
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.backtest import BracketSpec
+    from .analysis.runner import calibrate
+
+    bracket = BracketSpec(stop_points=args.stop or s.stop_loss_points,
+                          target_points=args.target or s.take_profit_points)
+    try:
+        res = calibrate(symbol, bracket=bracket, refresh_daily=not args.offline)
+    except Exception as exc:
+        print(f"Calibration failed: {exc}")
+        return 1
+    print(res.summary)
+    return 0
+
+
+def cmd_recommend(args: argparse.Namespace) -> int:
+    """Produce today's recommended spread from pre-open inputs (writes a report)."""
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.runner import run_daily
+
+    try:
+        res = run_daily(symbol, overnight_range=args.overnight_range,
+                        current_price=args.price, current_spread=s.entry_points,
+                        date=args.date)
+    except Exception as exc:
+        print(f"Recommendation failed: {exc}")
+        return 1
+    print(res.report_text)
+    print(f"\nReport written to {res.report_path}")
+    return 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     from .selftest import run_selftest
 
@@ -380,12 +416,31 @@ def build_parser() -> argparse.ArgumentParser:
                     help="minutes after the open to keep per day (default 15)")
     sp.set_defaults(func=cmd_ingest_history)
 
+    sp = sub.add_parser("calibrate", help="backtest cached history + fit the spread model")
+    sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
+    sp.add_argument("--stop", type=float, help="bracket stop points (default: stop_loss_points)")
+    sp.add_argument("--target", type=float, help="bracket target points (default: take_profit_points)")
+    sp.add_argument("--offline", action="store_true", help="use cached daily data (no Yahoo fetch)")
+    sp.set_defaults(func=cmd_calibrate)
+
+    sp = sub.add_parser("recommend", help="today's recommended spread from pre-open inputs")
+    sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
+    sp.add_argument("--overnight-range", type=float, help="Globex overnight range (points)")
+    sp.add_argument("--price", type=float, help="pre-open price (for the gap estimate)")
+    sp.add_argument("--date", help="ISO date override (default: today)")
+    sp.set_defaults(func=cmd_recommend)
+
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)
     return p
 
 
 def main(argv: Optional[list] = None) -> int:
+    # Windows consoles default to cp1252, which can't encode some report glyphs.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
