@@ -7,10 +7,17 @@ live account or network.
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from .models import Account, Contract, OrderResult, OrderSide, OrderType, StraddleLeg
+from .models import Account, Bar, Contract, OrderResult, OrderSide, OrderType, StraddleLeg
+
+
+def _parse_iso(t: str) -> datetime:
+    """Parse an API/Bar ISO timestamp (trailing 'Z' allowed) to aware UTC."""
+    s = t.replace("Z", "+00:00") if t.endswith("Z") else t
+    dt = datetime.fromisoformat(s)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 class FakeClient:
@@ -26,6 +33,12 @@ class FakeClient:
         self.authenticated = False
         self.reject_sides: set = set()  # OrderSides whose entry placement is rejected
         self.modified: List[Dict[str, Any]] = []  # record of modify_order calls
+        # --- historical-bar simulation (analyzer/backtest tests) ---
+        # If `scripted_bars` is set, retrieve_bars returns those within the window.
+        # Otherwise it synthesizes a flat 1-min series, but returns nothing for
+        # windows older than `history_since` (mimics finite TopStep retention).
+        self.scripted_bars: Optional[List[Bar]] = None
+        self.history_since: Optional[datetime] = None
 
     # --- auth / account / contract ---
     def authenticate(self, username: str, api_key: str) -> str:
@@ -52,6 +65,53 @@ class FakeClient:
 
     def session_range(self, contract_id, start, end, live: bool = False):
         return {"high": self._last + 30, "low": self._last - 25}
+
+    def retrieve_bars(
+        self,
+        contract_id: str,
+        *,
+        unit: int = 2,
+        unit_number: int = 1,
+        limit: int = 5,
+        live: bool = False,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        include_partial_bar: bool = True,
+    ) -> List[Bar]:
+        """Offline stand-in for ProjectXClient.retrieve_bars (newest-first).
+
+        Two modes: replay ``scripted_bars`` within the window, or synthesize a flat
+        1-minute series — empty if the window predates ``history_since`` so the
+        depth probe and retention behavior are testable without a network.
+        """
+        end_time = end_time or datetime.now(timezone.utc)
+        if start_time is None:
+            start_time = end_time - timedelta(minutes=max(limit * unit_number * 2, 30))
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+
+        if self.scripted_bars is not None:
+            sel = [b for b in self.scripted_bars
+                   if start_time <= _parse_iso(b.t) < end_time]
+            sel.sort(key=lambda b: b.t, reverse=True)  # newest-first, like the API
+            return sel[:limit] if limit else sel
+
+        if self.history_since is not None and start_time < self.history_since:
+            return []  # outside the simulated retention window
+
+        # Synthesize a deterministic flat 1-min series across the window.
+        step = timedelta(minutes=unit_number) if unit == 2 else timedelta(minutes=1)
+        bars: List[Bar] = []
+        t = start_time
+        while t < end_time and len(bars) < (limit or 100000):
+            iso = t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            bars.append(Bar(t=iso, o=self._last, h=self._last, l=self._last,
+                            c=self._last, v=0.0))
+            t += step
+        bars.sort(key=lambda b: b.t, reverse=True)  # newest-first
+        return bars
 
     # --- orders ---
     def place_order(self, **kw) -> OrderResult:

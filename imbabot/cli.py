@@ -275,6 +275,27 @@ def cmd_browser_calibrate(args: argparse.Namespace) -> int:
     return run_calibration(args.platform, url_override=args.url or "")
 
 
+def cmd_probe_history(args: argparse.Namespace) -> int:
+    """Phase 0: measure how far back TopStep serves 1-minute bars for the symbol."""
+    log = _logger()
+    engine = _connected_engine(log)
+    if not engine:
+        return 1
+    contract = engine.contract or engine.refresh_contract()
+    if not contract:
+        print("Could not resolve a contract. Check contract_symbol in config.")
+        return 1
+    from .analysis import probe_depth
+
+    use_live = bool(args.live) or engine.settings.use_live_data
+    feed = "LIVE" if use_live else "sim"
+    print(f"Probing 1-minute history depth for {contract.name} ({contract.id}) "
+          f"on the {feed} feed …\n")
+    result = probe_depth(engine.client, contract.id, live=use_live)
+    print(result.summary())
+    return 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     from .selftest import run_selftest
 
@@ -325,6 +346,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("platform", choices=["projectx", "tradesea"])
     sp.add_argument("--url", help="override the URL to open")
     sp.set_defaults(func=cmd_browser_calibrate)
+
+    sp = sub.add_parser("probe-history", help="measure how far back 1-min bars are available")
+    sp.add_argument("--live", action="store_true", help="probe the LIVE data feed (not sim)")
+    sp.set_defaults(func=cmd_probe_history)
 
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)
