@@ -366,7 +366,9 @@ def cmd_calibrate_morning(args: argparse.Namespace) -> int:
     from .analysis.runner import calibrate_morning
 
     try:
-        res = calibrate_morning(symbol, tp_points=args.tp_points,
+        res = calibrate_morning(symbol, tp_points=(args.tp_points or s.analysis_tp_points),
+                                slippage_points=s.analysis_slippage_points,
+                                commission_points=s.analysis_commission_points,
                                 refresh_daily=not args.offline)
     except Exception as exc:
         print(f"Calibration failed: {exc}")
@@ -385,7 +387,7 @@ def cmd_morning(args: argparse.Namespace) -> int:
         res = run_morning(symbol, overnight_range=args.overnight_range, current_price=args.price,
                           current_spread=s.entry_points, target_dollars=args.target,
                           dollars_per_point=args.dollars_per_point, max_contracts=args.max_contracts,
-                          date=args.date)
+                          min_spread=s.analysis_min_spread, date=args.date)
     except Exception as exc:
         print(f"Morning plan failed: {exc}")
         return 1
@@ -474,8 +476,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("calibrate-morning", help="fit the morning model (spread x stop)")
     sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
-    sp.add_argument("--tp-points", type=float, default=13.3,
-                    help="take-profit distance in points (default 13.3 = $800/3ct NQ)")
+    sp.add_argument("--tp-points", type=float, default=None,
+                    help="take-profit distance in points (default: analysis_tp_points setting)")
     sp.add_argument("--offline", action="store_true", help="use cached daily data (no Yahoo fetch)")
     sp.set_defaults(func=cmd_calibrate_morning)
 

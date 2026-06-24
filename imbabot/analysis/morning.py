@@ -74,7 +74,7 @@ class MorningModel:
                        key=lambda i: math.dist(z, self.hist_rows[i]))
         return order[:min(k, len(order))]
 
-    def recommend(self, row: Dict[str, float]) -> MorningPlan:
+    def recommend(self, row: Dict[str, float], *, min_spread: float = 0.0) -> MorningPlan:
         if not self.means or not self.cells:
             return MorningPlan("SKIP", 0, 0, "low", "low", "high", 0.0, 0.0,
                                "knn-policy", "No model fitted.")
@@ -84,14 +84,21 @@ class MorningModel:
         ncells = len(self.cells)
 
         # For each cell, average P&L / win-rate / whipsaw across the similar mornings.
-        best_i, best_mean = 0, None
+        # Respect the entry floor: never recommend a spread tighter than ``min_spread``
+        # (slippage + pre-open fills make ultra-tight entries unrealistic).
+        best_i, best_mean = None, None
         mean_pnl = [0.0] * ncells
         for ci in range(ncells):
             vals = [self.hist_pnl[i][ci] for i in nbrs]
             m = statistics.fmean(vals) if vals else 0.0
             mean_pnl[ci] = m
+            if self.cells[ci][0] < min_spread:
+                continue
             if best_mean is None or m > best_mean:
                 best_mean, best_i = m, ci
+        if best_i is None:                       # floor excluded all cells -> widest one
+            best_i = max(range(ncells), key=lambda c: self.cells[c][0])
+            best_mean = mean_pnl[best_i]
 
         spread, stop = self.cells[best_i]
         nb_pnl = [self.hist_pnl[i][best_i] for i in nbrs]

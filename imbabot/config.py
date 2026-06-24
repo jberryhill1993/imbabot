@@ -84,6 +84,12 @@ class Settings:
     # and re-arms itself after each fire. Empty = use the 09:30 open default.
     strategy_fire_time: str = ""      # "HH:MM:SS" in YOUR local time, or "" to disable
 
+    # --- Morning Plan analyzer (advisory) ---
+    analysis_slippage_points: float = 2.0    # adverse slip per stop fill (entry + stop-loss)
+    analysis_commission_points: float = 0.13  # round-trip commission/contract in points (~$2.6 NQ)
+    analysis_min_spread: float = 10.0        # never recommend an entry tighter than this
+    analysis_tp_points: float = 13.3         # take-profit distance the model assumes (pts)
+
     # --- backend selection ---
     backend: str = "api"              # "api" (ProjectX REST) | "browser" (automation)
     browser_driver: str = "selenium"  # "selenium" (bundles into the .exe/.app, drives installed Chrome) | "playwright"

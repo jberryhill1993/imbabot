@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..config import config_dir
-from .backtest import (BacktestResult, BracketSpec, Backtest2D, backtest, backtest_2d,
-                       spread_grid, stop_grid)
+from .backtest import (BacktestResult, BracketSpec, Backtest2D, CostSpec, backtest,
+                       backtest_2d, spread_grid, stop_grid)
 from .csv_history import load_records
 from .features import feature_row, row_from_record
 from .market_history import NQ_SYMBOL, VIX_SYMBOL, by_date, load_daily, prior_value, refresh
@@ -94,9 +94,11 @@ def calibrate_morning(
     symbol: str,
     *,
     tp_points: float = 13.3,
+    slippage_points: float = 2.0,
+    commission_points: float = 0.13,
     refresh_daily: bool = True,
 ) -> MorningCalibration:
-    """Backtest cached history over spread x stop, fit + save the MorningModel."""
+    """Backtest cached history over spread x stop (NET of costs), fit + save the model."""
     records = load_records(symbol)
     if not records:
         raise RuntimeError(f"No cached history for {symbol}. Run ingest-history first.")
@@ -105,9 +107,10 @@ def calibrate_morning(
     vix_by_date = by_date(vix)
 
     fine = _is_fine_grained(records)
+    costs = CostSpec(slippage_points=slippage_points, commission_points=commission_points)
     # Coarse step-2 grids keep the per-day-cell matrix the k-NN policy stores compact.
     bt = backtest_2d(records, target_points=tp_points, spreads=spread_grid(6, 28, 2),
-                     stops=stop_grid(4, 20, 2), fine_grained=fine)
+                     stops=stop_grid(4, 20, 2), fine_grained=fine, costs=costs)
     dates = [r.date for r in records]
     feature_rows = [row_from_record(r, vix_by_date, nq) for r in records]
     model = MorningModel().fit(feature_rows, dates, bt)
@@ -115,10 +118,12 @@ def calibrate_morning(
 
     bc = bt.best_cell()
     res = "1-second (exact whipsaw)" if fine else "1-minute (estimated whipsaw)"
-    summary = (f"Morning calibration: {len(records)} days, {res}. "
-               f"Best static cell spread/stop = {bc} (TP {tp_points:.0f}pt). "
-               f"Model n={model.n_samples}"
-               f"{' (LOW confidence — needs ~250 days)' if model.n_samples < 120 else ''}.")
+    profitable = sum(1 for d in dates if bt.per_day_best[d].pnl_points > 0)
+    summary = (f"Morning calibration: {len(records)} days, {res}, NET of "
+               f"{slippage_points:.1f}pt slippage + {commission_points:.2f}pt commission. "
+               f"Best static cell spread/stop = {bc}. Net-positive days at best cell: "
+               f"{profitable}/{len(dates)} ({profitable*100//max(1,len(dates))}%). "
+               f"Model n={model.n_samples}.")
     return MorningCalibration(len(records), bc, bt, model, summary)
 
 
@@ -140,6 +145,7 @@ def run_morning(
     target_dollars: Optional[float] = None,
     dollars_per_point: float = 20.0,
     max_contracts: int = 10,
+    min_spread: float = 0.0,
     date: Optional[str] = None,
 ) -> MorningResult:
     """Produce today's Morning Plan (+ optional sizing) from pre-open inputs."""
@@ -156,7 +162,7 @@ def run_morning(
     else:
         gap = None
     row = feature_row(date, overnight_range, gap, vix_by_date, nq)
-    plan = model.recommend(row)
+    plan = model.recommend(row, min_spread=min_spread)
 
     sizing = None
     if target_dollars:
