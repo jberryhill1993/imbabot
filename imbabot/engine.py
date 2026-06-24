@@ -284,17 +284,30 @@ class BotEngine:
         self.log("Session token was stale — re-authenticated.", "warn")
 
     def _capture_reference_price(self, attempts: int = 2) -> float:
-        """Capture the reference price, retrying once on a transient failure."""
+        """Capture the reference price, auto-detecting the data feed.
+
+        Tries the preferred feed (``use_live_data`` = live, else sim) first, then
+        falls back to the other if it returns nothing. This makes eval accounts
+        (sim-only) and funded accounts (live) both work without flipping a toggle —
+        a single hard-coded feed would fail price capture on the wrong account type.
+        Logs which feed produced the price.
+        """
+        preferred = bool(self.settings.use_live_data)
         last_exc: Optional[Exception] = None
-        for i in range(1, attempts + 1):
-            try:
-                return self.client.last_price(
-                    self.contract.id, live=self.settings.use_live_data
-                )
-            except Exception as exc:
-                last_exc = exc
-                self.log(f"price capture attempt {i}/{attempts} failed: {exc}", "warn")
-        raise RuntimeError(f"could not capture reference price: {last_exc}")
+        for live in (preferred, not preferred):
+            for i in range(1, attempts + 1):
+                try:
+                    px = self.client.last_price(self.contract.id, live=live)
+                    self.log(f"Reference price via {'LIVE' if live else 'sim'} feed.")
+                    return px
+                except Exception as exc:
+                    last_exc = exc
+                    self.log(f"{'LIVE' if live else 'sim'} feed attempt {i}/{attempts} "
+                             f"failed: {exc}", "warn")
+            if live == preferred:
+                self.log(f"{'LIVE' if preferred else 'sim'} feed unavailable; "
+                         f"falling back to {'sim' if preferred else 'LIVE'} feed.", "warn")
+        raise RuntimeError(f"could not capture reference price on either feed: {last_exc}")
 
     def _on_fire(self) -> None:
         try:
