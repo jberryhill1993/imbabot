@@ -607,6 +607,13 @@ class ImbabotGUI:
         self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
         ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
                         style="S.TCheckbutton").grid(row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        # Stop-limit entries: cap slippage past the trigger (forward-test on PRAC).
+        self.var_stop_limit = tk.BooleanVar(value=self.settings.entry_order_type == "stop_limit")
+        self.var_limit_off = tk.StringVar(value=str(self.settings.entry_limit_offset_ticks))
+        ttk.Checkbutton(tab, text="Stop-limit entries (cap slippage)", variable=self.var_stop_limit,
+                        style="S.TCheckbutton").grid(row=6, column=2, sticky="w", padx=(28, 0))
+        ttk.Entry(tab, textvariable=self.var_limit_off, width=4, font=(FONT, 11)).grid(
+            row=6, column=3, sticky="w")
         ttk.Label(tab, text="Stop-loss / Take-profit are handled by TopStep (Position Brackets) by "
                             "default. Tick a box to let the BOT manage that bracket instead — only if "
                             "your TopStep account is in Auto OCO Brackets mode (not Position Brackets).",
@@ -735,6 +742,8 @@ class ImbabotGUI:
             s.bot_stop_loss = bool(self.var_bot_sl.get())
             s.bot_take_profit = bool(self.var_bot_tp.get())
             s.trade_mode = self.var_mode.get()
+            s.entry_order_type = "stop_limit" if self.var_stop_limit.get() else "stop"
+            s.entry_limit_offset_ticks = int(self.var_limit_off.get())
             s.use_live_data = bool(self.var_live_data.get())
             s.dry_run = bool(self.var_dry.get())
         except ValueError as exc:
