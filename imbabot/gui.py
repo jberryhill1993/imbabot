@@ -594,25 +594,23 @@ class ImbabotGUI:
         self.ent_tp.grid(row=5, column=1, sticky="w", pady=5)
         self._on_bracket_toggle()    # set initial grayed/enabled state from settings
 
-        self.var_mode = tk.StringVar(value=self.settings.trade_mode)
+        # Only One-Trade is exposed. Semi-Auto / Two-Trade remain in the engine
+        # (TradeMode values) but are no longer offered in the UI.
+        self.var_mode = tk.StringVar(value="one_trade")
         ttk.Label(tab, text="Mode", style="Hs.TLabel").grid(row=3, column=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="Semi-Auto (you manage)", variable=self.var_mode, value="semi_auto",
-                        style="S.TRadiobutton").grid(row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="One-Trade (auto OCO)  ✓ recommended", variable=self.var_mode,
+        ttk.Radiobutton(tab, text="One-Trade (auto OCO)  ✓", variable=self.var_mode,
                         value="one_trade", style="Req.TRadiobutton").grid(
-                        row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="Two-Trade (leave both in)", variable=self.var_mode, value="two_trade",
-                        style="S.TRadiobutton").grid(row=6, column=2, columnspan=2, sticky="w", padx=(28, 0))
+                        row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        # use_live_data is hidden — the engine auto-detects the live/sim feed. The var
+        # is retained (default off) so settings + the advanced override still work.
+        self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
+        self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
+        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
+                        style="S.TCheckbutton").grid(row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
         ttk.Label(tab, text="Stop-loss / Take-profit are handled by TopStep (Position Brackets) by "
                             "default. Tick a box to let the BOT manage that bracket instead — only if "
                             "your TopStep account is in Auto OCO Brackets mode (not Position Brackets).",
                   style="Hint.TLabel", wraplength=520).grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
-        self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
-        ttk.Checkbutton(tab, text="Use live data feed", variable=self.var_live_data,
-                        style="S.TCheckbutton").grid(row=7, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
-                        style="S.TCheckbutton").grid(row=8, column=2, columnspan=2, sticky="w", padx=(28, 0))
         ttk.Button(tab, text="Save settings", command=self._on_save, style="Accent.TButton").grid(
             row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
@@ -631,6 +629,31 @@ class ImbabotGUI:
                             "orders when DRY-RUN is off. DISARM or this button cancels. Holidays are NOT "
                             "skipped — disarm on holidays.",
                   style="Hint.TLabel", wraplength=860).grid(row=12, column=0, columnspan=5, sticky="w", pady=(8, 0))
+
+        # --- Morning Plan (advisory: recommended spread / stop / sizing) ---
+        ttk.Separator(tab).grid(row=13, column=0, columnspan=5, sticky="ew", pady=(16, 6))
+        ttk.Label(tab, text="Morning Plan — advisory (the bot never changes your settings)",
+                  style="Hs.TLabel").grid(row=14, column=0, columnspan=5, sticky="w")
+        self.lbl_mp_action = ttk.Label(tab, text="— not yet calculated —", style="Hs.TLabel")
+        self.lbl_mp_action.grid(row=15, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.btn_mp_recalc = ttk.Button(tab, text="↻ Recalculate now",
+                                        command=self._on_morning_recalc, style="Accent.TButton")
+        self.btn_mp_recalc.grid(row=15, column=2, sticky="w", padx=6, pady=(6, 0))
+        self.btn_mp_calib = ttk.Button(tab, text="Run 12-month calibration",
+                                       command=self._on_morning_calibrate, style="Ghost.TButton")
+        self.btn_mp_calib.grid(row=15, column=3, sticky="w", pady=(6, 0))
+        self.lbl_mp_detail = ttk.Label(
+            tab, text="Ingest history + calibrate once, then Recalculate 10–30 min before the open.",
+            style="Sm.TLabel", wraplength=860)
+        self.lbl_mp_detail.grid(row=16, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ttk.Label(tab, text="Profit target $", style="Sm.TLabel").grid(row=17, column=0, sticky="w", pady=(8, 0))
+        self.var_mp_target = tk.StringVar(value="")
+        ttk.Entry(tab, textvariable=self.var_mp_target, width=10, font=(FONT, 11)).grid(
+            row=17, column=1, sticky="w", padx=6, pady=(8, 0))
+        ttk.Label(tab, text="(optional — fills in suggested contracts + $ brackets on Recalculate)",
+                  style="Hint.TLabel").grid(row=17, column=2, columnspan=3, sticky="w", pady=(8, 0))
+        self.lbl_mp_sizing = ttk.Label(tab, text="", style="Sm.TLabel", wraplength=860)
+        self.lbl_mp_sizing.grid(row=18, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
     def _build_tab_test(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
@@ -763,7 +786,7 @@ class ImbabotGUI:
         if browser:
             self.lbl_backend_hint.configure(
                 text="Browser mode: a real Chrome window opens; you log in, then Arm. TopstepX (projectx) "
-                     "ships pre-calibrated — use Semi-Auto.")
+                     "ships pre-calibrated.")
         else:
             self.lbl_backend_hint.configure(
                 text="API mode: official TopstepX API (recommended). Needs your API key.")
@@ -1136,8 +1159,96 @@ class ImbabotGUI:
             self._update_ticker(evt[1])
         elif kind == "ticker_vix":
             self._update_vix(evt[1])
+        elif kind == "morning_plan":
+            self._show_morning_plan(evt[1])
+        elif kind == "morning_calib":
+            self.btn_mp_calib.configure(state="normal")
+            self.lbl_mp_detail.configure(text=evt[1])
+            self.log(evt[1])
+        elif kind == "morning_error":
+            self.btn_mp_recalc.configure(state="normal")
+            self.btn_mp_calib.configure(state="normal")
+            self.lbl_mp_action.configure(text="—")
+            self.lbl_mp_detail.configure(text=f"Morning Plan error: {evt[1]}")
+            self.log(f"morning plan: {evt[1]}", "error")
         elif kind == "error":
             self.log(evt[1], "error")
+
+    # ---------------------------------------------------- Morning Plan (advisory)
+    def _on_morning_calibrate(self) -> None:
+        self.btn_mp_calib.configure(state="disabled")
+        self.lbl_mp_detail.configure(text="Calibrating… backtesting cached history (this can take a moment).")
+        threading.Thread(target=self._morning_calib_worker, daemon=True).start()
+
+    def _morning_calib_worker(self) -> None:
+        try:
+            from .analysis.runner import calibrate_morning
+            symbol = self.var_symbol.get().strip() or self.settings.contract_symbol
+            res = calibrate_morning(symbol)
+            self.events.put(("morning_calib", res.summary))
+        except Exception as exc:
+            self.events.put(("morning_error", str(exc)))
+
+    def _on_morning_recalc(self) -> None:
+        self.btn_mp_recalc.configure(state="disabled")
+        self.lbl_mp_action.configure(text="… calculating …")
+        threading.Thread(target=self._morning_recalc_worker, daemon=True).start()
+
+    def _morning_recalc_worker(self) -> None:
+        try:
+            from .analysis.runner import run_morning
+            symbol = self.var_symbol.get().strip() or self.settings.contract_symbol
+            onr = price = None
+            dpp = 20.0
+            if self.engine:
+                try:
+                    rng = self.engine.overnight_range()
+                    onr = (rng["high"] - rng["low"]) if rng else None
+                except Exception:
+                    onr = None
+                try:
+                    price = self.engine.last_price()
+                except Exception:
+                    price = None
+                c = getattr(self.engine, "contract", None)
+                if c and c.tick_size:
+                    dpp = c.tick_value / c.tick_size
+            try:
+                cur = float(self.var_points.get())
+            except (ValueError, AttributeError):
+                cur = None
+            target = None
+            t = self.var_mp_target.get().strip()
+            if t:
+                try:
+                    target = float(t.replace("$", "").replace(",", ""))
+                except ValueError:
+                    target = None
+            res = run_morning(symbol, overnight_range=onr, current_price=price,
+                              current_spread=cur, target_dollars=target, dollars_per_point=dpp)
+            self.events.put(("morning_plan", res))
+        except Exception as exc:
+            self.events.put(("morning_error", str(exc)))
+
+    def _show_morning_plan(self, res) -> None:
+        self.btn_mp_recalc.configure(state="normal")
+        p = res.plan
+        tag = "TRADE" if p.action == "TRADE" else "⚠ SKIP TODAY"
+        self.lbl_mp_action.configure(
+            text=f"{tag}   ·   spread ±{p.spread:.0f}   stop {p.stop_points:.0f}   "
+                 f"conviction {p.conviction.upper()}   whipsaw {p.whipsaw_risk.upper()}")
+        self.lbl_mp_detail.configure(text=p.rationale)
+        if res.sizing:
+            sz = res.sizing
+            self.lbl_mp_sizing.configure(
+                text=f"Target ${sz.target_dollars:,.0f} → {sz.contracts} contract(s)"
+                     f"{' (capped)' if sz.capped else ''}  ·  set TopStep TP ${sz.tp_bracket_dollars:,.0f} "
+                     f"/ SL ${sz.sl_bracket_dollars:,.0f}  ·  win ~${sz.gross_win_dollars:,.0f} / "
+                     f"loss ~${sz.downside_dollars:,.0f}")
+        else:
+            self.lbl_mp_sizing.configure(text="")
+        self.log(f"Morning Plan: {p.action} ±{p.spread:.0f}/stop {p.stop_points:.0f} "
+                 f"({p.conviction} conviction)")
 
     def _append_log(self, line: str, level: str = "info") -> None:
         self.txt.configure(state="normal")
