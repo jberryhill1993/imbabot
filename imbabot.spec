@@ -45,6 +45,10 @@ hiddenimports += ["imbabot.gui", "imbabot.engine", "imbabot.projectx", "imbabot.
 # them so the (calibrated) packs ship inside the .exe/.app for downloaders.
 datas += [("imbabot/browser/selectors", "imbabot/browser/selectors")]
 
+# Analyzer data (economic-event calendar) — bundled so calendar.py resolves it under
+# sys._MEIPASS in the frozen app (0.2.1+ Morning Plan).
+datas += [("imbabot/analysis/data", "imbabot/analysis/data")]
+
 _is_mac = sys.platform == "darwin"
 # Platform-correct icon format: macOS EXE/.app uses .icns, Windows .exe uses .ico.
 if _is_mac:

@@ -316,5 +316,77 @@ def run_selftest() -> int:
     _check("flatten_all left working orders alone", fake.cancelled == [],
            f"cancelled={fake.cancelled}")
 
+    # 10) analysis: Databento ingester, 2-D backtest, sizing, morning model
+    from .analysis.types import DayRecord, OpenBar
+    from .analysis.backtest import (simulate_day, backtest_2d, BracketSpec,
+                                    spread_grid, stop_grid)
+    from .analysis.sizing import size_for_target, point_value
+    from .analysis.morning import MorningModel
+    from .analysis.databento_csv import parse_databento_csv, build_day_records_1s
+    from datetime import timezone, timedelta
+
+    # 10a) Databento parse (ISO + decimal) -> ref price + second offsets
+    ou = datetime(2026, 6, 22, 13, 30, 0, tzinfo=timezone.utc)
+    rows = ["ts_event,open,high,low,close,volume,symbol"]
+    for i, (o, h, l, c) in enumerate([(30823.25, 30823.5, 30811, 30812),
+                                      (30812, 30819, 30811, 30818)]):
+        t = (ou + timedelta(seconds=i)).strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
+        rows.append(f"{t},{o},{h},{l},{c},10,NQU6")
+    dbp = os.path.join(tmp, "db.csv")
+    open(dbp, "w").write("\n".join(rows) + "\n")
+    recs = build_day_records_1s(parse_databento_csv(dbp), open_minutes=15)
+    _check("databento parse: ref + second offsets",
+           bool(recs) and recs[0].ref_price == 30823.25
+           and [b.minute for b in recs[0].open_bars] == [0, 1], f"recs={recs}")
+
+    # 10b) fine_grained honors entry-bar wicks (coarse uses close-proxy)
+    wick = DayRecord(date="d", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21012, 21001, 21011, 1),   # long +10 fills; low 21001 <= SL(21002)
+        OpenBar(1, 21011, 21025, 21010, 21024, 1)])  # later TP +13 = 21023
+    br = BracketSpec(stop_points=8, target_points=13)
+    _check("fine_grained entry-bar wick stops; coarse survives",
+           simulate_day(wick, 10, br, fine_grained=True).resolved == "stop"
+           and simulate_day(wick, 10, br, fine_grained=False).resolved == "target")
+
+    # 10c) 2-D backtest: tight spread+stop is the worst whipsaw cell
+    rev = DayRecord(date="r", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21001, 20988, 20990, 1),    # tags 12-spread short
+        OpenBar(1, 20990, 21010, 20989, 21009, 1)])   # reverses up -> stop
+    bt = backtest_2d([wick, rev], target_points=13, spreads=spread_grid(8, 20, 2),
+                     stops=stop_grid(6, 16, 2), fine_grained=True)
+    _check("2-D backtest produces a best cell", bt.best_cell() is not None)
+    _check("2-D records per-day best outcome", len(bt.per_day_best) == 2)
+
+    # 10d) sizing math: contracts, brackets, cap, honest downside
+    dpp = point_value(5.0, 0.25)          # NQ $20/pt
+    sp = size_for_target(1000, tp_points=13.3, stop_points=9, dollars_per_point=dpp,
+                         winrate=0.6, max_contracts=10)
+    _check("sizing: 4 contracts for $1000 target", sp.contracts == 4, f"got {sp.contracts}")
+    _check("sizing: SL bracket = stop*ct*$/pt", round(sp.sl_bracket_dollars) == round(9 * 4 * dpp))
+    _check("sizing: caps at max_contracts",
+           size_for_target(5000, tp_points=13.3, stop_points=9, dollars_per_point=dpp,
+                           winrate=0.6, max_contracts=10).capped)
+
+    # 10e) morning model discriminates TRADE vs SKIP
+    from .analysis.backtest import DayOutcome, Backtest2D
+
+    def _row(v, a, pre=0, f=0):
+        return {"prior_vix": v, "vix_change": 0.0, "overnight_range": 0.0, "gap_abs": 0.0,
+                "atr14": a, "preopen_score": pre, "fomc": f}
+    dts, frows, opt, best = [], [], {}, {}
+    for i in range(10):
+        d = f"w{i}"; dts.append(d); frows.append(_row(13 + i * 0.1, 600))
+        opt[d] = (14, 10); best[d] = DayOutcome(14, True, "long", "target", False, 13.3)
+    for i in range(10):
+        d = f"l{i}"; dts.append(d); frows.append(_row(28 + i * 0.1, 1200, 2, 1))
+        opt[d] = (18, 8); best[d] = DayOutcome(18, True, "short", "stop", True, -8.3)
+    bt2 = Backtest2D(spreads=[8, 12, 16, 20], stops=[6, 8, 10, 12], target_points=13.3,
+                     per_day_optimal=opt, per_day_best=best)
+    mm = MorningModel().fit(frows, dts, bt2)
+    _check("morning model: calm low-VIX -> TRADE",
+           mm.recommend(_row(13, 600)).action == "TRADE")
+    _check("morning model: stormy high-VIX FOMC -> SKIP",
+           mm.recommend(_row(29, 1250, 2, 1)).action == "SKIP")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

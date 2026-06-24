@@ -12,10 +12,26 @@ New work and the decisions behind it go here as we build them. Nothing in this s
 ships until 0.2.1 is released (merged to `main`, `-dev` suffix dropped, tagged `v0.2.1`).
 
 ### Added
-- _(nothing yet)_
+- **Morning Plan analyzer** (advisory; never auto-applies): a backtest-calibrated model
+  that recommends, from pre-open VIX / overnight range / gap / ATR / economic-event
+  features, the day's **entry spread**, **stop distance**, a **conviction** rating, and a
+  **TRADE / SKIP** call. Shown on the Strategy tab with "Recalculate now" + "Run 12-month
+  calibration" buttons. CLI: `calibrate-morning`, `morning`.
+- **Profit-target sizing calculator** — type a $ target; get suggested contracts, the
+  TopStep $ TP/SL brackets to set (so the point-stop holds at that size), the symmetric
+  downside, and EV. Honest by design: size scales the outcome, not the odds.
+- **2-D backtest** sweeping entry spread × stop distance with **exact second-level whipsaw
+  detection** when fed 1-second data.
+- **Databento 1-second CSV ingester** (`ingest-history --format databento`) — resolves the
+  intrabar high/low sequence the open whipsaws on. FirstRate 1-minute path retained.
+- **Data-feed auto-detect** — price capture tries the live feed then falls back to sim,
+  logging which it used. Mixed eval/funded accounts work without a manual toggle.
+- History-depth probe (`probe-history`) + Yahoo 12-mo daily VIX/NQ + US econ calendar.
 
 ### Changed
-- _(nothing yet)_
+- **Strategy tab Mode** now exposes only **One-Trade (auto OCO)** (Semi-Auto / Two-Trade
+  remain in the engine but are hidden); the **Use live data feed** checkbox is hidden
+  (auto-detected).
 
 ### Fixed
 - _(nothing yet)_

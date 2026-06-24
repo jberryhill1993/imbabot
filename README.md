@@ -101,6 +101,26 @@ first sessions and watch it work.
 
 ---
 
+## Morning Plan — advisory spread / stop / sizing (0.2.1+)
+
+The Strategy tab has a **Morning Plan** panel that, from a one-time backtest of historical
+opening behavior, recommends the day's **entry spread**, **stop distance**, a **conviction**
+rating, and a **TRADE / SKIP** call — plus a profit-target box that suggests **contracts** and
+the **TopStep $ brackets** to set. It is **advisory only**: the bot never changes your settings;
+you review the numbers and enter them yourself.
+
+Setup (one time): obtain historical 1-second NQ bars (Databento `ohlcv-1s`, CSV) and ingest +
+calibrate:
+```
+python -m imbabot.cli ingest-history "NQ_1s.csv" --symbol NQ --format databento
+python -m imbabot.cli calibrate-morning --symbol NQ --tp-points 13.3
+```
+Each morning (10–30 min before the open) click **Recalculate now** (or `python -m imbabot.cli
+morning --symbol NQ --target 1000`). Notes: the recommendation is a statistical estimate, **not a
+prediction or financial advice**; it widens the entry / stop or says SKIP on high-whipsaw mornings.
+Brackets are in **dollars**, so the point-stop shrinks as you add contracts — the sizing box gives
+the dollar bracket to set so it holds.
+
 ## Daily routine (mirrors the guide)
 
 1. Launch Imbabot; **Connect** (this resolves your contract automatically).
