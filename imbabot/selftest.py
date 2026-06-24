@@ -367,25 +367,26 @@ def run_selftest() -> int:
            size_for_target(5000, tp_points=13.3, stop_points=9, dollars_per_point=dpp,
                            winrate=0.6, max_contracts=10).capped)
 
-    # 10e) morning model discriminates TRADE vs SKIP
-    from .analysis.backtest import DayOutcome, Backtest2D
+    # 10e) morning k-NN policy discriminates TRADE vs SKIP
+    from .analysis.backtest import Backtest2D
 
     def _row(v, a, pre=0, f=0):
         return {"prior_vix": v, "vix_change": 0.0, "overnight_range": 0.0, "gap_abs": 0.0,
                 "atr14": a, "preopen_score": pre, "fomc": f}
-    dts, frows, opt, best = [], [], {}, {}
-    for i in range(10):
-        d = f"w{i}"; dts.append(d); frows.append(_row(13 + i * 0.1, 600))
-        opt[d] = (14, 10); best[d] = DayOutcome(14, True, "long", "target", False, 13.3)
-    for i in range(10):
-        d = f"l{i}"; dts.append(d); frows.append(_row(28 + i * 0.1, 1200, 2, 1))
-        opt[d] = (18, 8); best[d] = DayOutcome(18, True, "short", "stop", True, -8.3)
-    bt2 = Backtest2D(spreads=[8, 12, 16, 20], stops=[6, 8, 10, 12], target_points=13.3,
-                     per_day_optimal=opt, per_day_best=best)
+    cells = [(14, 10), (18, 8)]
+    dts, frows, pnl, whip = [], [], {}, {}
+    for i in range(35):  # calm low-VIX winners (>k so neighbors are query-specific)
+        d = f"w{i}"; dts.append(d); frows.append(_row(13 + i * 0.05, 600))
+        pnl[d] = [13.3, 5.0]; whip[d] = [0, 0]
+    for i in range(35):  # stormy high-VIX FOMC losers: negative everywhere
+        d = f"l{i}"; dts.append(d); frows.append(_row(28 + i * 0.05, 1200, 2, 1))
+        pnl[d] = [-8.3, -8.3]; whip[d] = [1, 1]
+    bt2 = Backtest2D(spreads=[14, 18], stops=[10, 8], target_points=13.3,
+                     cells_order=cells, per_day_cell_pnl=pnl, per_day_cell_whip=whip)
     mm = MorningModel().fit(frows, dts, bt2)
-    _check("morning model: calm low-VIX -> TRADE",
+    _check("morning policy: calm low-VIX -> TRADE",
            mm.recommend(_row(13, 600)).action == "TRADE")
-    _check("morning model: stormy high-VIX FOMC -> SKIP",
+    _check("morning policy: stormy high-VIX FOMC -> SKIP",
            mm.recommend(_row(29, 1250, 2, 1)).action == "SKIP")
 
     print(f"\n{_PASS} passed, {_FAIL} failed")

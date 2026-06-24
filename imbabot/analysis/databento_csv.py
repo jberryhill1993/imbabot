@@ -144,8 +144,96 @@ def build_day_records_1s(
 def ingest_databento_csv(
     path: str | Path, symbol: str, *, open_minutes: int = DEFAULT_OPEN_MINUTES
 ) -> List[DayRecord]:
-    """Parse a Databento ohlcv-1s CSV, build DayRecords, cache them, and return them."""
+    """Parse a small Databento ohlcv-1s CSV, build DayRecords, cache, return.
+
+    For large multi-contract `.csv`/`.csv.zst` exports (the `NQ.FUT` parent), use
+    ``ingest_databento_stream`` instead — it streams, windows to the open, and picks
+    the front-month contract per day.
+    """
     bars = parse_databento_csv(path)
     records = build_day_records_1s(bars, open_minutes=open_minutes)
+    save_records(symbol, records, source=f"databento:{Path(path).name}")
+    return records
+
+
+def _open_text(path: str | Path):
+    """Open a Databento export, transparently decompressing `.zst` (Python 3.14 stdlib)."""
+    sp = str(path)
+    if sp.endswith(".zst"):
+        from compression import zstd  # py3.14+ stdlib
+        return zstd.open(sp, "rt", encoding="utf-8")
+    return open(sp, "r", newline="", encoding="utf-8")
+
+
+def ingest_databento_stream(
+    path: str | Path, symbol: str, *, open_minutes: int = DEFAULT_OPEN_MINUTES,
+    pre_pad_min: int = 1,
+) -> List[DayRecord]:
+    """Stream a (possibly huge, possibly `.zst`, multi-contract) Databento ohlcv-1s
+    export, keep only the opening-window bars, pick the **front-month** contract per
+    day (highest opening volume), and cache one DayRecord per session.
+
+    Memory stays low: a cheap UTC-hour string prefilter drops ~22/24 of the day before
+    any timezone math, then ET-window bars are kept per (date, contract).
+    """
+    from collections import defaultdict
+
+    tz = _tz()
+    open_t, end_t = RTH_OPEN, dtime(RTH_OPEN.hour, RTH_OPEN.minute + open_minutes) \
+        if RTH_OPEN.minute + open_minutes < 60 else dtime(RTH_OPEN.hour + 1,
+                                                          (RTH_OPEN.minute + open_minutes) % 60)
+    lo_t = dtime(open_t.hour, open_t.minute - pre_pad_min) if open_t.minute >= pre_pad_min \
+        else dtime(open_t.hour - 1, 60 - pre_pad_min)
+    # 09:30 ET is 13:30 UTC (EDT) or 14:30 UTC (EST) -> these UTC hours bracket the window.
+    _UTC_HOURS = {"13", "14"}
+
+    # date -> symbol -> {offset_sec: (o,h,l,c,v)} ; date -> symbol -> total volume
+    bars: dict = defaultdict(lambda: defaultdict(dict))
+    vol: dict = defaultdict(lambda: defaultdict(float))
+
+    with _open_text(path) as fh:
+        reader = _csv.reader(fh)
+        header = next(reader)
+        cols = {n.strip().lower(): i for i, n in enumerate(header)}
+        ts_i = next((cols[k] for k in _TS_KEYS if k in cols), 0)
+        o_i, h_i, l_i, c_i, v_i = cols["open"], cols["high"], cols["low"], cols["close"], cols["volume"]
+        sym_i = cols.get("symbol")
+        for row in reader:
+            ts = row[ts_i]
+            if len(ts) < 16 or ts[11:13] not in _UTC_HOURS:  # cheap prefilter
+                continue
+            dt = _parse_ts(ts)
+            if dt is None:
+                continue
+            et = dt.astimezone(tz)
+            t = et.time()
+            if not (lo_t <= t < end_t):
+                continue
+            sym = row[sym_i] if sym_i is not None else symbol
+            o, h, l, c = (_parse_px(row[o_i]), _parse_px(row[h_i]),
+                          _parse_px(row[l_i]), _parse_px(row[c_i]))
+            if None in (o, h, l, c):
+                continue
+            try:
+                v = float(row[v_i] or 0.0)
+            except ValueError:
+                v = 0.0
+            open_dt = datetime.combine(et.date(), RTH_OPEN, tzinfo=tz)
+            off = int((et - open_dt).total_seconds())
+            d = et.date().isoformat()
+            bars[d][sym][off] = (o, h, l, c, v)
+            vol[d][sym] += v
+
+    records: List[DayRecord] = []
+    for d in sorted(bars):
+        # front month = the contract with the most opening-window volume that day
+        front = max(vol[d], key=lambda s: vol[d][s])
+        day = bars[d][front]
+        if 0 not in day:          # need the exact 09:30:00 bar as the reference
+            continue
+        ref = day[0][0]           # 09:30:00 open
+        open_bars = [OpenBar(off, *day[off]) for off in sorted(day) if 0 <= off < open_minutes * 60]
+        records.append(DayRecord(date=d, ref_price=ref, open_bars=open_bars,
+                                 overnight_high=None, overnight_low=None, prior_close=None))
     save_records(symbol, records, source=f"databento:{Path(path).name}")
     return records

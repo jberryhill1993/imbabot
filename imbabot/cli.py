@@ -309,8 +309,8 @@ def cmd_ingest_history(args: argparse.Namespace) -> int:
 
     print(f"Ingesting {args.csv} as {symbol} ({args.format}) …")
     if args.format == "databento":
-        from .analysis.databento_csv import ingest_databento_csv
-        records = ingest_databento_csv(args.csv, symbol, open_minutes=args.open_minutes)
+        from .analysis.databento_csv import ingest_databento_stream
+        records = ingest_databento_stream(args.csv, symbol, open_minutes=args.open_minutes)
     else:
         from .analysis.csv_history import ingest_csv
         records = ingest_csv(args.csv, symbol, open_minutes=args.open_minutes)

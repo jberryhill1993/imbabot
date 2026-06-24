@@ -1,12 +1,14 @@
-"""Morning plan model — predicts spread, stop, conviction, and trade/skip.
+"""Morning plan model — a feature-conditioned k-NN policy over the 2-D backtest.
 
-Trains on the 2-D backtest (`backtest_2d`): the per-day optimal (spread, stop) and the
-day's outcome at that cell. Predicts, from today's pre-open features, the recommended
-**spread** and **stop** (pure-Python ridge, falling back to k-NN when samples are few),
-plus a **conviction** and **TRADE/SKIP** call derived from how the most-similar past
-mornings actually resolved. Advisory only — the bot never applies these.
+For today's pre-open features it finds the most-similar past mornings and picks the
+(spread, stop) cell with the best **average** P&L across them — then judges conviction
+and TRADE/SKIP from how that *same* cell actually performed on those mornings. This is
+deliberately NOT a regression to each day's argmax cell (that target is pure noise and
+predicts near-constant extremes); the policy answers "on days that looked like today,
+which fixed setup did best, and how reliably?"
 
-Persisted to `config_dir()/analysis/morning_model.json`.
+Advisory only — the bot never applies these. Persisted to
+`config_dir()/analysis/morning_model.json`.
 """
 from __future__ import annotations
 
@@ -20,7 +22,9 @@ from typing import Dict, List, Optional
 from ..config import config_dir
 from .backtest import Backtest2D
 from .features import FEATURE_NAMES, to_vector
-from .model import _solve, _standardize, MIN_FIT_SAMPLES, RIDGE_LAMBDA, K_NEIGHBORS
+from .model import _standardize
+
+MORNING_K = 30          # neighbors averaged per cell (stable with ~250 days)
 
 
 @dataclass
@@ -33,20 +37,8 @@ class MorningPlan:
     whipsaw_risk: str        # "low" | "medium" | "high"
     predicted_winrate: float
     expected_pnl_points: float
-    method: str              # "regression" | "knn"
+    method: str
     rationale: str
-
-
-def _ridge_fit(Xs: List[List[float]], y: List[float], k: int) -> tuple:
-    """Ridge on standardized features -> (weights, y_mean)."""
-    y_mean = statistics.fmean(y) if y else 0.0
-    if not Xs:
-        return [0.0] * k, y_mean
-    yc = [v - y_mean for v in y]
-    A = [[sum(Xs[r][i] * Xs[r][j] for r in range(len(Xs))) + (RIDGE_LAMBDA if i == j else 0.0)
-          for j in range(k)] for i in range(k)]
-    b = [sum(Xs[r][i] * yc[r] for r in range(len(Xs))) for i in range(k)]
-    return _solve(A, b), y_mean
 
 
 @dataclass
@@ -54,105 +46,81 @@ class MorningModel:
     feature_names: List[str] = field(default_factory=lambda: list(FEATURE_NAMES))
     means: List[float] = field(default_factory=list)
     stds: List[float] = field(default_factory=list)
-    w_spread: List[float] = field(default_factory=list)
-    w_stop: List[float] = field(default_factory=list)
-    spread_mean: float = 0.0
-    stop_mean: float = 0.0
+    cells: List[list] = field(default_factory=list)        # [[spread,stop], ...] (JSON-safe)
+    hist_rows: List[List[float]] = field(default_factory=list)   # standardized features/day
+    hist_pnl: List[List[float]] = field(default_factory=list)    # day x cell P&L (points)
+    hist_whip: List[List[int]] = field(default_factory=list)     # day x cell whipsaw flag
     n_samples: int = 0
-    spread_lo: float = 6.0
-    spread_hi: float = 30.0
-    stop_lo: float = 4.0
-    stop_hi: float = 20.0
     target_points: float = 13.0
-    # k-NN store (standardized rows + per-day optimal + that day's outcome)
-    hist_rows: List[List[float]] = field(default_factory=list)
-    hist_spread: List[float] = field(default_factory=list)
-    hist_stop: List[float] = field(default_factory=list)
-    hist_pnl: List[float] = field(default_factory=list)
-    hist_whip: List[int] = field(default_factory=list)
 
     # ---- fit ----
     def fit(self, feature_rows: List[Dict[str, float]], dates: List[str],
             bt: Backtest2D) -> "MorningModel":
         self.n_samples = len(feature_rows)
         self.target_points = bt.target_points
-        if bt.spreads:
-            self.spread_lo, self.spread_hi = min(bt.spreads), max(bt.spreads)
-        if bt.stops:
-            self.stop_lo, self.stop_hi = min(bt.stops), max(bt.stops)
+        self.cells = [list(c) for c in bt.cells_order]
         if not feature_rows:
             return self
         X = [to_vector(r) for r in feature_rows]
         self.means, self.stds = _standardize(X)
-        Xs = [[(r[j] - self.means[j]) / self.stds[j] for j in range(len(r))] for r in X]
-        k = len(FEATURE_NAMES)
-        sp = [bt.per_day_optimal[d][0] for d in dates]
-        st = [bt.per_day_optimal[d][1] for d in dates]
-        self.w_spread, self.spread_mean = _ridge_fit(Xs, sp, k)
-        self.w_stop, self.stop_mean = _ridge_fit(Xs, st, k)
-        self.hist_rows = Xs
-        self.hist_spread, self.hist_stop = sp, st
-        self.hist_pnl = [bt.per_day_best[d].pnl_points for d in dates]
-        self.hist_whip = [int(bt.per_day_best[d].whipsaw) for d in dates]
+        self.hist_rows = [[(r[j] - self.means[j]) / self.stds[j] for j in range(len(r))] for r in X]
+        self.hist_pnl = [bt.per_day_cell_pnl[d] for d in dates]
+        self.hist_whip = [bt.per_day_cell_whip[d] for d in dates]
         return self
 
     # ---- predict ----
-    def _z(self, row: Dict[str, float]) -> List[float]:
-        v = to_vector(row)
-        return [(v[j] - self.means[j]) / self.stds[j] for j in range(len(v))]
-
-    def _reg(self, z, w, mean):
-        return mean + sum(wi * zi for wi, zi in zip(w, z))
-
-    def _neighbors(self, z, k=K_NEIGHBORS):
-        d = sorted(range(len(self.hist_rows)),
-                   key=lambda i: math.dist(z, self.hist_rows[i]))
-        return d[:min(k, len(d))]
+    def _neighbors(self, z: List[float], k: int) -> List[int]:
+        order = sorted(range(len(self.hist_rows)),
+                       key=lambda i: math.dist(z, self.hist_rows[i]))
+        return order[:min(k, len(order))]
 
     def recommend(self, row: Dict[str, float]) -> MorningPlan:
-        if not self.means:
-            return MorningPlan("SKIP", self.spread_lo, self.stop_lo, "low", "low", "high",
-                               0.0, 0.0, "knn", "No model fitted yet.")
-        z = self._z(row)
-        nbrs = self._neighbors(z)
-        knn_sp = statistics.fmean(self.hist_spread[i] for i in nbrs) if nbrs else self.spread_mean
-        knn_st = statistics.fmean(self.hist_stop[i] for i in nbrs) if nbrs else self.stop_mean
-        use_reg = self.n_samples >= MIN_FIT_SAMPLES
-        spread = self._reg(z, self.w_spread, self.spread_mean) if use_reg else knn_sp
-        stop = self._reg(z, self.w_stop, self.stop_mean) if use_reg else knn_st
-        spread = float(round(max(self.spread_lo, min(self.spread_hi, spread))))
-        stop = float(round(max(self.stop_lo, min(self.stop_hi, stop))))
+        if not self.means or not self.cells:
+            return MorningPlan("SKIP", 0, 0, "low", "low", "high", 0.0, 0.0,
+                               "knn-policy", "No model fitted.")
+        v = to_vector(row)
+        z = [(v[j] - self.means[j]) / self.stds[j] for j in range(len(v))]
+        nbrs = self._neighbors(z, MORNING_K)
+        ncells = len(self.cells)
 
-        # Outcome expectations from the most-similar past mornings.
-        pnl = [self.hist_pnl[i] for i in nbrs]
-        whip = [self.hist_whip[i] for i in nbrs]
-        winrate = statistics.fmean(1.0 if p > 0 else 0.0 for p in pnl) if pnl else 0.0
-        exp_pnl = statistics.fmean(pnl) if pnl else 0.0
-        whip_rate = statistics.fmean(whip) if whip else 0.0
+        # For each cell, average P&L / win-rate / whipsaw across the similar mornings.
+        best_i, best_mean = 0, None
+        mean_pnl = [0.0] * ncells
+        for ci in range(ncells):
+            vals = [self.hist_pnl[i][ci] for i in nbrs]
+            m = statistics.fmean(vals) if vals else 0.0
+            mean_pnl[ci] = m
+            if best_mean is None or m > best_mean:
+                best_mean, best_i = m, ci
 
-        action = "SKIP" if (exp_pnl <= 0 or whip_rate >= 0.6) else "TRADE"
-        conviction = ("high" if (winrate >= 0.65 and whip_rate <= 0.25) else
-                      "medium" if (winrate >= 0.5 and whip_rate <= 0.45) else "low")
-        whipsaw_risk = "low" if whip_rate < 0.25 else ("medium" if whip_rate < 0.45 else "high")
+        spread, stop = self.cells[best_i]
+        nb_pnl = [self.hist_pnl[i][best_i] for i in nbrs]
+        nb_whip = [self.hist_whip[i][best_i] for i in nbrs]
+        winrate = statistics.fmean(1.0 if p > 0 else 0.0 for p in nb_pnl) if nb_pnl else 0.0
+        whip_rate = statistics.fmean(nb_whip) if nb_whip else 0.0
+        exp_pnl = best_mean or 0.0
+
+        action = "SKIP" if exp_pnl <= 0 else "TRADE"
+        conviction = ("high" if (winrate >= 0.6 and whip_rate <= 0.35 and exp_pnl >= 2) else
+                      "medium" if (winrate >= 0.5 and exp_pnl > 0) else "low")
+        whipsaw_risk = "low" if whip_rate < 0.35 else ("medium" if whip_rate < 0.55 else "high")
         confidence = ("high" if self.n_samples >= 120 else
-                      "medium" if self.n_samples >= MIN_FIT_SAMPLES else "low")
-        method = "regression" if use_reg else "knn"
+                      "medium" if self.n_samples >= 40 else "low")
         rationale = (
-            f"Similar mornings (n={len(nbrs)} of {self.n_samples}): win-rate {winrate*100:.0f}%, "
-            f"whipsaw {whip_rate*100:.0f}%, avg best ~{exp_pnl:+.1f} pts. "
-            f"Entry ±{spread:.0f}, stop {stop:.0f} (TP {self.target_points:.0f}). "
+            f"On the {len(nbrs)} most-similar mornings (of {self.n_samples}), entry ±{spread:.0f}"
+            f"/stop {stop:.0f} (TP {self.target_points:.0f}) averaged {exp_pnl:+.1f} pts, "
+            f"win-rate {winrate*100:.0f}%, whipsaw {whip_rate*100:.0f}%. "
             f"VIX {row.get('prior_vix', 0):.1f}, ATR14 {row.get('atr14', 0):.0f}, "
             f"events preopen={int(row.get('preopen_score', 0))} fomc={int(row.get('fomc', 0))}."
         )
-        return MorningPlan(action, spread, stop, conviction, confidence, whipsaw_risk,
-                           winrate, exp_pnl, method, rationale)
+        return MorningPlan(action, float(spread), float(stop), conviction, confidence,
+                           whipsaw_risk, winrate, exp_pnl, "knn-policy", rationale)
 
     # ---- persistence ----
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in (
-            "feature_names", "means", "stds", "w_spread", "w_stop", "spread_mean",
-            "stop_mean", "n_samples", "spread_lo", "spread_hi", "stop_lo", "stop_hi",
-            "target_points", "hist_rows", "hist_spread", "hist_stop", "hist_pnl", "hist_whip")}
+            "feature_names", "means", "stds", "cells", "hist_rows", "hist_pnl",
+            "hist_whip", "n_samples", "target_points")}
 
     @classmethod
     def from_dict(cls, d: dict) -> "MorningModel":

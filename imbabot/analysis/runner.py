@@ -105,8 +105,9 @@ def calibrate_morning(
     vix_by_date = by_date(vix)
 
     fine = _is_fine_grained(records)
-    bt = backtest_2d(records, target_points=tp_points, spreads=spread_grid(),
-                     stops=stop_grid(), fine_grained=fine)
+    # Coarse step-2 grids keep the per-day-cell matrix the k-NN policy stores compact.
+    bt = backtest_2d(records, target_points=tp_points, spreads=spread_grid(6, 28, 2),
+                     stops=stop_grid(4, 20, 2), fine_grained=fine)
     dates = [r.date for r in records]
     feature_rows = [row_from_record(r, vix_by_date, nq) for r in records]
     model = MorningModel().fit(feature_rows, dates, bt)
