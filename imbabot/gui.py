@@ -1192,7 +1192,11 @@ class ImbabotGUI:
     def _morning_calib_worker(self) -> None:
         try:
             from .analysis.runner import calibrate_morning
-            symbol = self.var_symbol.get().strip() or self.settings.contract_symbol
+            import re
+            raw = (self.var_symbol.get().strip() or self.settings.contract_symbol).upper()
+            # Strip contract month+year suffix so "NQU26" → "NQ", "MNQH26" → "MNQ".
+            # History is ingested under the parent symbol, not the specific front month.
+            symbol = re.sub(r'[FGHJKMNQUVXZ]\d{2}$', '', raw) or raw
             res = calibrate_morning(symbol)
             self.events.put(("morning_calib", res.summary))
         except Exception as exc:
