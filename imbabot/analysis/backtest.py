@@ -43,8 +43,16 @@ class DayOutcome:
 
 def simulate_day(
     day: DayRecord, spread: float, bracket: BracketSpec, tick: float = 0.25,
+    *, fine_grained: bool = False,
 ) -> DayOutcome:
-    """Simulate the one-trade straddle for a single day at a single spread."""
+    """Simulate the one-trade straddle for a single day at a single spread.
+
+    ``fine_grained`` (1-second data): the pre-trigger part of the entry bar is
+    sub-second, so the entry bar honors actual wicks like every other bar — exact
+    whipsaw detection. For coarse 1-minute bars (``False``) the entry-bar stop only
+    counts on a close-through (the pre-trigger minute can't have hit a not-yet-placed
+    stop), which conservatively under-counts winners.
+    """
     ref = day.ref_price
     long_stop = round_to_tick(ref + spread, tick)
     short_stop = round_to_tick(ref - spread, tick)
@@ -70,20 +78,17 @@ def simulate_day(
             stop_level, target_level = entry + bracket.stop_points, entry - bracket.target_points
 
         # Resolve from the trigger bar onward; adverse (stop) is checked before the
-        # target so wins are under-counted. On the ENTRY bar the stop only counts if
-        # the bar CLOSES through it (the pre-trigger part of the range can't have hit
-        # a stop that wasn't placed yet); on later bars a wick low/high counts, as a
-        # resting stop order really would be filled by it.
+        # target so wins are under-counted.
         for j, b2 in enumerate(bars[i:]):
-            entry_bar = j == 0
+            wick = fine_grained or j > 0   # entry bar uses close-proxy only when coarse
             if side == "long":
-                stopped = (b2.c <= stop_level) if entry_bar else (b2.l <= stop_level)
+                stopped = (b2.l <= stop_level) if wick else (b2.c <= stop_level)
                 if stopped:
                     return DayOutcome(spread, True, side, "stop", True, -bracket.stop_points)
                 if b2.h >= target_level:
                     return DayOutcome(spread, True, side, "target", False, bracket.target_points)
             else:
-                stopped = (b2.c >= stop_level) if entry_bar else (b2.h >= stop_level)
+                stopped = (b2.h >= stop_level) if wick else (b2.c >= stop_level)
                 if stopped:
                     return DayOutcome(spread, True, side, "stop", True, -bracket.stop_points)
                 if b2.l <= target_level:
@@ -131,13 +136,14 @@ def backtest(
     bracket: BracketSpec,
     grid: Optional[List[float]] = None,
     tick: float = 0.25,
+    fine_grained: bool = False,
 ) -> BacktestResult:
     """Sweep ``grid`` across all ``records``; aggregate P&L/whipsaw per spread."""
     grid = grid or spread_grid()
     res = BacktestResult(grid=grid)
 
     for sp in grid:
-        outcomes = [simulate_day(d, sp, bracket, tick) for d in records]
+        outcomes = [simulate_day(d, sp, bracket, tick, fine_grained=fine_grained) for d in records]
         triggered = [o for o in outcomes if o.triggered]
         res.per_spread[sp] = SpreadStats(
             spread=sp,
@@ -151,9 +157,89 @@ def backtest(
     for d in records:
         best, best_key = None, None
         for sp in grid:
-            o = simulate_day(d, sp, bracket, tick)
+            o = simulate_day(d, sp, bracket, tick, fine_grained=fine_grained)
             key = (o.pnl_points, sp)
             if best_key is None or key > best_key:
                 best_key, best = key, sp
+        res.per_day_optimal[d.date] = best
+    return res
+
+
+# ----------------------------------------------- 2-D sweep (spread x stop)
+@dataclass
+class CellStats:
+    spread: float
+    stop: float
+    mean_pnl: float
+    trigger_rate: float
+    whipsaw_rate: float
+    n_days: int
+
+
+@dataclass
+class Backtest2D:
+    spreads: List[float]
+    stops: List[float]
+    target_points: float
+    cells: Dict[tuple, CellStats] = field(default_factory=dict)        # (spread,stop)->stats
+    per_day_optimal: Dict[str, tuple] = field(default_factory=dict)    # date->(spread,stop)
+
+    def best_cell(self) -> Optional[tuple]:
+        """(spread, stop) with the highest mean P&L (tie -> wider spread, wider stop)."""
+        if not self.cells:
+            return None
+        c = max(self.cells.values(), key=lambda s: (s.mean_pnl, s.spread, s.stop))
+        return (c.spread, c.stop)
+
+    def whipsaw_at(self, spread: float, stop: float) -> float:
+        if not self.cells:
+            return 0.0
+        key = min(self.cells, key=lambda k: (abs(k[0] - spread), abs(k[1] - stop)))
+        return self.cells[key].whipsaw_rate
+
+
+def stop_grid(lo: float = 4, hi: float = 20, step: float = 1) -> List[float]:
+    n = int(round((hi - lo) / step))
+    return [round(lo + i * step, 4) for i in range(n + 1)]
+
+
+def backtest_2d(
+    records: List[DayRecord],
+    *,
+    target_points: float,
+    spreads: Optional[List[float]] = None,
+    stops: Optional[List[float]] = None,
+    tick: float = 0.25,
+    fine_grained: bool = False,
+) -> Backtest2D:
+    """Sweep entry spread x stop distance (TP held at ``target_points``)."""
+    spreads = spreads or spread_grid()
+    stops = stops or stop_grid()
+    res = Backtest2D(spreads=spreads, stops=stops, target_points=target_points)
+
+    # Cache per (spread,stop) outcomes so per-day optimal reuses them.
+    grid_outcomes: Dict[tuple, List[DayOutcome]] = {}
+    for sp in spreads:
+        for st in stops:
+            br = BracketSpec(stop_points=st, target_points=target_points)
+            outcomes = [simulate_day(d, sp, br, tick, fine_grained=fine_grained) for d in records]
+            grid_outcomes[(sp, st)] = outcomes
+            trig = [o for o in outcomes if o.triggered]
+            res.cells[(sp, st)] = CellStats(
+                spread=sp, stop=st,
+                mean_pnl=statistics.fmean(o.pnl_points for o in outcomes) if outcomes else 0.0,
+                trigger_rate=(len(trig) / len(outcomes)) if outcomes else 0.0,
+                whipsaw_rate=(sum(o.whipsaw for o in trig) / len(trig)) if trig else 0.0,
+                n_days=len(outcomes),
+            )
+
+    for idx, d in enumerate(records):
+        best, best_key = None, None
+        for sp in spreads:
+            for st in stops:
+                o = grid_outcomes[(sp, st)][idx]
+                key = (o.pnl_points, sp, st)   # tie -> wider spread then wider stop
+                if best_key is None or key > best_key:
+                    best_key, best = key, (sp, st)
         res.per_day_optimal[d.date] = best
     return res
