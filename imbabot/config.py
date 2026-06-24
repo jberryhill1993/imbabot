@@ -14,8 +14,14 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import Optional
 
-APP_NAME = "imbabot"
-KEYRING_SERVICE = "imbabot-projectx"
+# Dev/test builds keep their state SEPARATE from the stable bot so the two can run
+# side by side (e.g. a 0.2.1-dev test bot on a practice account next to the stable
+# 0.2.0.1 bot on funded accounts) without sharing settings or stored API keys.
+from . import __version__  # __init__ imports nothing heavy -> no circular import
+
+_DEV = "dev" in __version__.lower()
+APP_NAME = "imbabot-dev" if _DEV else "imbabot"
+KEYRING_SERVICE = "imbabot-projectx-dev" if _DEV else "imbabot-projectx"
 
 
 def config_dir() -> Path:
