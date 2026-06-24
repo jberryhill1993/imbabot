@@ -370,50 +370,55 @@ class BotEngine:
         )
         self._monitor_thread.start()
 
-    def _monitor_oco(self, plan: StraddlePlan, poll_seconds: float = 1.0) -> None:
-        """One-Trade OCO: when one entry fills, cancel the remaining entries.
+    def _oco_scan(self, plan: StraddlePlan, acct: int, cid: str, seen_open: set) -> bool:
+        """One OCO check. Returns True once it has acted (a leg filled → others
+        cancelled) so the monitor can stop.
 
-        We only act on a confirmed *fill* (a non-flat position on our
-        contract), not on an external cancel. Rather than inferring which side
-        filled from the position's direction, we cancel every plan entry that
-        is still OPEN in the book — the filled leg is no longer open, so this
-        is correct even if the position payload's direction encoding changes.
-        TopStep's Position Bracket protects the filled side regardless.
+        A fill is detected by an entry ORDER leaving the open-order book *after*
+        we've confirmed it resting — NOT by a currently-open position. A filled
+        order stays gone; a position can open and close (TP/SL) between polls, which
+        is exactly how the old position-only check let the opposite entry survive and
+        fill later. A live position is also accepted as a fill signal (belt-and-braces).
+        ``seen_open`` accumulates our entries we've observed resting, so we never treat
+        a not-yet-propagated entry's absence as a fill.
         """
+        our_ids = {leg.order_id for leg in plan.legs if leg.order_id is not None}
+        try:
+            open_ids = {_order_id(o) for o in self.client.search_open_orders(acct)}
+        except Exception as exc:
+            self.log(f"OCO order poll error: {exc}", "warn")
+            return False
+        seen_open |= (our_ids & open_ids)          # confirm which entries are resting
+        gone = {oid for oid in seen_open if oid not in open_ids}  # a confirmed entry filled
+        try:
+            net = _net_position_for(self.client.search_open_positions(acct), cid)
+        except Exception:
+            net = 0
+        if not gone and net == 0:
+            return False                            # both entries still resting
+
+        self.log(f"Fill detected (entry filled; net={net}). Cancelling the other entry.")
+        for leg in plan.legs:
+            oid = leg.order_id
+            if oid is None or oid not in open_ids:
+                continue                            # this leg filled or is already gone
+            try:
+                self.client.cancel_order(acct, oid)
+                self.log(f"Cancelled remaining {leg.side.name} entry orderId={oid}.")
+            except Exception as exc:
+                self.log(f"Failed to cancel {leg.side.name} entry {oid}: {exc}", "error")
+        return True
+
+    def _monitor_oco(self, plan: StraddlePlan, poll_seconds: float = 0.5) -> None:
+        """One-Trade OCO: the instant one entry fills, cancel the other so only one
+        position is ever taken (no second trade that day). See ``_oco_scan``."""
         self.log("OCO monitor started (One-Trade mode).")
         acct = self.account.id
         cid = plan.contract.id
+        seen_open: set = set()
         deadline = datetime.now() + timedelta(hours=1)
         while not self._monitor_stop.is_set() and datetime.now() < deadline:
-            try:
-                positions = self.client.search_open_positions(acct)
-            except Exception as exc:
-                self.log(f"position poll error: {exc}", "warn")
-                self._monitor_stop.wait(poll_seconds)
-                continue
-
-            net = _net_position_for(positions, cid)
-            if net != 0:
-                self.log(
-                    f"Fill detected ({'LONG' if net > 0 else 'SHORT'} {abs(net)}). "
-                    "Cancelling any remaining entry legs."
-                )
-                try:
-                    open_ids = {_order_id(o) for o in self.client.search_open_orders(acct)}
-                except Exception as exc:
-                    self.log(f"order lookup failed: {exc} — attempting cancels blind.", "warn")
-                    open_ids = None
-                for leg in plan.legs:
-                    oid = leg.order_id
-                    if oid is None:
-                        continue
-                    if open_ids is not None and oid not in open_ids:
-                        continue  # this leg filled (or is already gone)
-                    try:
-                        self.client.cancel_order(acct, oid)
-                        self.log(f"Cancelled remaining {leg.side.name} entry orderId={oid}.")
-                    except Exception as exc:
-                        self.log(f"Failed to cancel {leg.side.name} entry {oid}: {exc}", "error")
+            if self._oco_scan(plan, acct, cid, seen_open):
                 return
             self._monitor_stop.wait(poll_seconds)
         self.log("OCO monitor stopped.")

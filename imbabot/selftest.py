@@ -316,5 +316,25 @@ def run_selftest() -> int:
     _check("flatten_all left working orders alone", fake.cancelled == [],
            f"cancelled={fake.cancelled}")
 
+    # 9b) One-Trade OCO race: a leg that fills AND closes (TP) between polls must
+    # still cancel the opposite entry (the bug that let a 2nd trade fill on 06/24).
+    eng, fake = make_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    acct, cid = eng.account.id, eng.contract.id
+    seen = set()
+    acted0 = eng._oco_scan(plan, acct, cid, seen)
+    _check("OCO: no action while both entries rest",
+           acted0 is False and fake.cancelled == [], f"acted={acted0} cx={fake.cancelled}")
+    # short entry fills, then its bracket closes the position before the next poll:
+    # the entry is gone from the book but there is NO open position.
+    fake.orders.pop(plan.short_leg.order_id, None)
+    acted1 = eng._oco_scan(plan, acct, cid, seen)
+    _check("OCO: fast fill-then-flat still cancels the other entry",
+           acted1 is True and plan.long_leg.order_id in fake.cancelled,
+           f"acted={acted1} cancelled={fake.cancelled}")
+    _check("OCO: exactly the one surviving entry was cancelled", len(fake.cancelled) == 1,
+           f"cancelled={fake.cancelled}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
