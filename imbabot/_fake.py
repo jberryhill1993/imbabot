@@ -135,10 +135,11 @@ class FakeClient:
             sl_ticks = -leg.stop_loss_ticks if leg.side == OrderSide.BUY else leg.stop_loss_ticks
         if leg.take_profit_ticks:
             tp_ticks = leg.take_profit_ticks if leg.side == OrderSide.BUY else -leg.take_profit_ticks
+        otype = OrderType.STOP_LIMIT if leg.limit_price is not None else OrderType.STOP
         res = self.place_order(
             account_id=account_id, contract_id=contract_id,
-            order_type=OrderType.STOP, side=leg.side, size=leg.size,
-            stop_price=leg.stop_price, custom_tag=leg.custom_tag,
+            order_type=otype, side=leg.side, size=leg.size,
+            stop_price=leg.stop_price, limit_price=leg.limit_price, custom_tag=leg.custom_tag,
             stop_loss_ticks=sl_ticks, take_profit_ticks=tp_ticks,
         )
         leg.order_id = res.order_id

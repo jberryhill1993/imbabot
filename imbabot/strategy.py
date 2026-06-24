@@ -35,6 +35,10 @@ class StrategyParams:
     # and the bot places naked entries. When True the bot attaches that bracket.
     bot_stop_loss: bool = False
     bot_take_profit: bool = False
+    # Entry order type: "stop" (market stop) or "stop_limit" (won't fill worse than
+    # entry_limit_offset_ticks past the trigger — caps slippage, may miss fast moves).
+    entry_order_type: str = "stop"
+    entry_limit_offset_ticks: int = 4
 
     def validate(self) -> None:
         if self.entry_points <= 0:
@@ -70,6 +74,14 @@ def build_straddle(
     tp_ticks = (points_to_ticks(params.take_profit_points, tick)
                 if params.bot_take_profit and params.take_profit_points > 0 else 0)
 
+    # Stop-limit: the limit caps how far past the trigger you'll fill — above the
+    # trigger for a BUY, below it for a SELL. ``None`` keeps a plain market stop.
+    long_limit = short_limit = None
+    if params.entry_order_type == "stop_limit":
+        off = params.entry_limit_offset_ticks * tick
+        long_limit = round_to_tick(long_stop + off, tick)
+        short_limit = round_to_tick(short_stop - off, tick)
+
     long_leg = StraddleLeg(
         side=OrderSide.BUY,
         stop_price=long_stop,
@@ -77,6 +89,7 @@ def build_straddle(
         stop_loss_ticks=sl_ticks,
         take_profit_ticks=tp_ticks,
         custom_tag=f"{tag_prefix}-L",
+        limit_price=long_limit,
     )
     short_leg = StraddleLeg(
         side=OrderSide.SELL,
@@ -85,6 +98,7 @@ def build_straddle(
         stop_loss_ticks=sl_ticks,
         take_profit_ticks=tp_ticks,
         custom_tag=f"{tag_prefix}-S",
+        limit_price=short_limit,
     )
     return StraddlePlan(
         contract=contract,

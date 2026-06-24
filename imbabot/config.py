@@ -68,6 +68,11 @@ class Settings:
     # TopStep account to be in Auto OCO Brackets mode, not Position Brackets).
     bot_stop_loss: bool = False
     bot_take_profit: bool = False
+    # Entry order type: "stop" (market stop — always fills if touched, may slip) or
+    # "stop_limit" (won't fill worse than entry_limit_offset_ticks past the trigger —
+    # caps slippage but can miss fast breakouts). Forward-test stop_limit on PRAC.
+    entry_order_type: str = "stop"
+    entry_limit_offset_ticks: int = 4   # 4 ticks = 1.0 pt on NQ/MNQ
 
     # --- timing ---
     market_tz: str = "America/New_York"

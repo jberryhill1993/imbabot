@@ -122,6 +122,8 @@ class BotEngine:
             contracts=s.contracts,
             bot_stop_loss=s.bot_stop_loss,
             bot_take_profit=s.bot_take_profit,
+            entry_order_type=s.entry_order_type,
+            entry_limit_offset_ticks=s.entry_limit_offset_ticks,
         )
 
     def next_fire(self, now: Optional[datetime] = None) -> datetime:

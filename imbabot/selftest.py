@@ -81,6 +81,24 @@ def run_selftest() -> int:
     _check("SL on with TP=0 -> SL ticks present",
            plan0.long_leg.stop_loss_ticks == 12, f"got {plan0.long_leg.stop_loss_ticks}")
 
+    # 2d) stop-limit entries: limit caps slippage above the buy / below the sell
+    sl_params = StrategyParams(entry_points=12, contracts=1,
+                               entry_order_type="stop_limit", entry_limit_offset_ticks=4)
+    sl_plan = build_straddle(contract, 21000.0, sl_params, tag_prefix="t")
+    _check("stop-limit long: limit = stop + offset (1.0pt)",
+           sl_plan.long_leg.limit_price == 21013.0, f"got {sl_plan.long_leg.limit_price}")
+    _check("stop-limit short: limit = stop - offset",
+           sl_plan.short_leg.limit_price == 20987.0, f"got {sl_plan.short_leg.limit_price}")
+    plain = build_straddle(contract, 21000.0, StrategyParams(entry_points=12, contracts=1),
+                           tag_prefix="t")
+    _check("plain stop entry has no limit price", plain.long_leg.limit_price is None)
+    # placement maps the limit price to a STOP_LIMIT order type
+    f2 = FakeClient()
+    f2.place_straddle_leg(1, "C", sl_plan.long_leg)
+    _check("stop-limit leg placed as STOP_LIMIT type",
+           int(f2.placed[-1]["order_type"]) == int(OrderType.STOP_LIMIT)
+           and f2.placed[-1]["limit_price"] == 21013.0, f"placed={f2.placed[-1]}")
+
     # 3) scheduler: fixed 'now' before the open today -> fire is 09:29:57 today
     tz = ZoneInfo("America/New_York")
     now = datetime(2026, 6, 4, 8, 0, 0, tzinfo=tz)
@@ -364,9 +382,27 @@ def run_selftest() -> int:
         OpenBar(0, 21000, 21012, 21001, 21011, 1),   # long +10 fills; low 21001 <= SL(21002)
         OpenBar(1, 21011, 21025, 21010, 21024, 1)])  # later TP +13 = 21023
     br = BracketSpec(stop_points=8, target_points=13)
-    _check("fine_grained entry-bar wick stops; coarse survives",
-           simulate_day(wick, 10, br, fine_grained=True).resolved == "stop"
-           and simulate_day(wick, 10, br, fine_grained=False).resolved == "target")
+    _check("entry-bar pre-trigger low does not stop (resolves later to target)",
+           simulate_day(wick, 10, br).resolved == "target",
+           f"got {simulate_day(wick, 10, br).resolved}")
+
+    # 10b2) stop-limit entry: misses a violent cross, fills a calm one (no entry slip)
+    from imbabot.analysis.backtest import CostSpec
+    calm = DayRecord(date="c", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21010.5, 20999, 21010.25, 1),    # crosses +10 by 0.5 (<= tol 1)
+        OpenBar(1, 21010, 21025, 21009, 21024, 1)])         # -> TP +13
+    violent = DayRecord(date="v", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21016, 20999, 21015, 1)])         # shoots +16, 6pt past trigger
+    cst = CostSpec(slippage_points=2.0)
+    o_calm = simulate_day(calm, 10, br, fine_grained=True, costs=cst,
+                          entry_mode="stop_limit", limit_tolerance=1.0)
+    o_viol = simulate_day(violent, 10, br, fine_grained=True, costs=cst,
+                          entry_mode="stop_limit", limit_tolerance=1.0)
+    o_stop = simulate_day(calm, 10, br, fine_grained=True, costs=cst, entry_mode="stop")
+    _check("stop-limit misses the violent breakout", o_viol.resolved == "miss" and not o_viol.triggered)
+    _check("stop-limit fills the calm cross", o_calm.triggered and o_calm.resolved == "target")
+    _check("stop-limit fill has no entry slippage (beats stop by ~slip)",
+           o_calm.pnl_points > o_stop.pnl_points, f"limit={o_calm.pnl_points} stop={o_stop.pnl_points}")
 
     # 10c) 2-D backtest: tight spread+stop is the worst whipsaw cell
     rev = DayRecord(date="r", ref_price=21000, open_bars=[

@@ -45,11 +45,16 @@ class CostSpec:
     commission_points: float = 0.0
 
 
-def _net(gross: float, *, stopped: bool, costs: "CostSpec") -> float:
-    """Net a gross point result for entry slip + commission (+ stop-exit slip)."""
-    pnl = gross - costs.slippage_points - costs.commission_points
+def _net(gross: float, *, stopped: bool, costs: "CostSpec", entry_slip: float) -> float:
+    """Net a gross point result for entry slip + commission (+ stop-exit slip).
+
+    ``entry_slip`` is the slippage charged on the ENTRY fill — full slippage for a
+    stop entry, 0 for a stop-LIMIT entry (you got your price). A stop-loss exit always
+    slips (it's a stop-market); the take-profit is a limit and never slips.
+    """
+    pnl = gross - entry_slip - costs.commission_points
     if stopped:
-        pnl -= costs.slippage_points   # stop-market exit slips too (limit/TP does not)
+        pnl -= costs.slippage_points
     return pnl
 
 
@@ -66,19 +71,23 @@ class DayOutcome:
 def simulate_day(
     day: DayRecord, spread: float, bracket: BracketSpec, tick: float = 0.25,
     *, fine_grained: bool = False, costs: Optional[CostSpec] = None,
+    entry_mode: str = "stop", limit_tolerance: float = 1.0,
 ) -> DayOutcome:
     """Simulate the one-trade straddle for a single day at a single spread, net of costs.
 
-    ``fine_grained`` (1-second data): the pre-trigger part of the entry bar is
-    sub-second, so the entry bar honors actual wicks like every other bar — exact
-    whipsaw detection. For coarse 1-minute bars (``False``) the entry-bar stop only
-    counts on a close-through. ``costs`` charges slippage + commission so the P&L is
-    net (slippage hits tight entries hardest — the point that makes ±6 unrealistic).
+    ``fine_grained`` (1-second data): the entry bar honors actual wicks. ``costs``
+    charges slippage + commission so the P&L is net.
 
-    Entries fill from the FIRST bar onward; with pre-open bars in the window (negative
-    offsets) a too-tight entry can trip *before* the 09:30 open, exactly as live.
+    ``entry_mode``: "stop" (market stop entry — always fills if touched, pays entry
+    slippage) or "stop_limit" (fills at the trigger price with NO slippage, but MISSES
+    the day if price blows more than ``limit_tolerance`` points past the trigger on the
+    crossing bar — modeling the adverse selection of limit orders: you skip the violent
+    breakouts and only catch the calm ones). The protective stop-loss is a stop-market
+    in both modes, so it still slips.
     """
     costs = costs or CostSpec()
+    is_limit = entry_mode == "stop_limit"
+    entry_slip = 0.0 if is_limit else costs.slippage_points
     ref = day.ref_price
     long_stop = round_to_tick(ref + spread, tick)
     short_stop = round_to_tick(ref - spread, tick)
@@ -92,43 +101,54 @@ def simulate_day(
         if not (hit_long or hit_short):
             continue
 
-        # Both entries inside one bar's range => whipsaw (filled one, stopped other).
+        # Both entries inside one bar's range => whipsaw. A limit order can't be caught
+        # by a bar that violent, so it misses; a stop fills one side and is stopped.
         if hit_long and hit_short:
+            if is_limit:
+                return DayOutcome(spread, False, None, "miss", False, 0.0)
             return DayOutcome(spread, True, "long", "stop", True,
-                              _net(-bracket.stop_points, stopped=True, costs=costs))
+                              _net(-bracket.stop_points, stopped=True, costs=costs, entry_slip=entry_slip))
 
         side = "long" if hit_long else "short"
         entry = long_stop if hit_long else short_stop
+        # Stop-limit: if the crossing bar shot more than the tolerance past the trigger,
+        # the resting limit was skipped -> no fill that day (adverse selection).
+        if is_limit:
+            excursion = (b.h - long_stop) if side == "long" else (short_stop - b.l)
+            if excursion > limit_tolerance:
+                return DayOutcome(spread, False, None, "miss", False, 0.0)
         if side == "long":
             stop_level, target_level = entry - bracket.stop_points, entry + bracket.target_points
         else:
             stop_level, target_level = entry + bracket.stop_points, entry - bracket.target_points
 
-        # Resolve from the trigger bar onward; adverse (stop) is checked before the
-        # target so wins are under-counted.
+        # Resolve from the trigger bar onward; adverse (stop) is checked before target.
         for j, b2 in enumerate(bars[i:]):
-            wick = fine_grained or j > 0   # entry bar uses close-proxy only when coarse
+            # Entry bar (j==0): the pre-trigger excursion is ambiguous, so the stop
+            # only counts on a close-through. Later bars: a resting stop is hit by the
+            # wick. (``fine_grained`` is retained as an advisory "1-second data" flag.)
+            wick = j > 0
             if side == "long":
                 stopped = (b2.l <= stop_level) if wick else (b2.c <= stop_level)
                 if stopped:
                     return DayOutcome(spread, True, side, "stop", True,
-                                      _net(-bracket.stop_points, stopped=True, costs=costs))
+                                      _net(-bracket.stop_points, stopped=True, costs=costs, entry_slip=entry_slip))
                 if b2.h >= target_level:
                     return DayOutcome(spread, True, side, "target", False,
-                                      _net(bracket.target_points, stopped=False, costs=costs))
+                                      _net(bracket.target_points, stopped=False, costs=costs, entry_slip=entry_slip))
             else:
                 stopped = (b2.h >= stop_level) if wick else (b2.c >= stop_level)
                 if stopped:
                     return DayOutcome(spread, True, side, "stop", True,
-                                      _net(-bracket.stop_points, stopped=True, costs=costs))
+                                      _net(-bracket.stop_points, stopped=True, costs=costs, entry_slip=entry_slip))
                 if b2.l <= target_level:
                     return DayOutcome(spread, True, side, "target", False,
-                                      _net(bracket.target_points, stopped=False, costs=costs))
+                                      _net(bracket.target_points, stopped=False, costs=costs, entry_slip=entry_slip))
 
         # Unresolved by window end: mark to the last close (flatten at market).
         last_c = bars[-1].c
         gross = (last_c - entry) if side == "long" else (entry - last_c)
-        pnl = _net(gross, stopped=False, costs=costs)
+        pnl = _net(gross, stopped=False, costs=costs, entry_slip=entry_slip)
         return DayOutcome(spread, True, side, "window", pnl < 0, pnl)
 
     return DayOutcome(spread, False, None, "none", False, 0.0)  # spread too wide
