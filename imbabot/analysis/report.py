@@ -42,6 +42,43 @@ def daily_report(date: str, rec: Recommendation, row: Dict[str, float],
     return "\n".join(lines)
 
 
+def morning_report(date, plan, row, *, symbol="NQ", sizing=None,
+                   current_spread=None) -> str:
+    """Format the full Morning Plan (spread + stop + conviction + trade/skip [+ sizing])."""
+    head = "TRADE" if plan.action == "TRADE" else ">> SKIP TODAY <<"
+    lines = [
+        f"IMBABOT — Morning Plan for {date}  ({symbol})",
+        "=" * 60,
+        f"  ACTION:  {head}",
+        f"  Recommended entry spread:  +/- {plan.spread:.0f} pts",
+        f"  Recommended stop:          {plan.stop_points:.0f} pts",
+        f"  Conviction: {plan.conviction.upper()}   Whipsaw risk: {plan.whipsaw_risk.upper()}"
+        f"   Confidence: {plan.confidence.upper()} ({plan.method})",
+        f"  Predicted win-rate ~{plan.predicted_winrate*100:.0f}%, "
+        f"avg best ~{plan.expected_pnl_points:+.1f} pts",
+    ]
+    if current_spread is not None and abs(current_spread - plan.spread) >= 1:
+        lines.append(f"  (Your current spread +/- {current_spread:.0f} -> consider {plan.spread:.0f})")
+    if sizing is not None:
+        lines += [
+            "",
+            "  Profit-target sizing:",
+            f"    Target ${sizing.target_dollars:,.0f}  ->  {sizing.contracts} contract(s)"
+            + ("  (capped)" if sizing.capped else ""),
+            f"    Set TopStep TP ${sizing.tp_bracket_dollars:,.0f} / SL ${sizing.sl_bracket_dollars:,.0f}",
+            f"    Winning morning ~+${sizing.gross_win_dollars:,.0f}; "
+            f"stopped morning ~-${sizing.downside_dollars:,.0f}; EV ~${sizing.expected_value_dollars:,.0f}",
+            f"    {sizing.note}",
+        ]
+    lines += [
+        "",
+        f"  Reasoning: {plan.rationale}",
+        "",
+        "  " + DISCLAIMER,
+    ]
+    return "\n".join(lines)
+
+
 def calibration_summary(n_days: int, best_spread, per_spread: dict, model_n: int) -> str:
     lines = [
         f"Calibration complete: {n_days} trading days.",

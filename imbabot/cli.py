@@ -359,6 +359,41 @@ def cmd_recommend(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibrate_morning(args: argparse.Namespace) -> int:
+    """Backtest spread x stop and fit the morning model (spread+stop+conviction+skip)."""
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.runner import calibrate_morning
+
+    try:
+        res = calibrate_morning(symbol, tp_points=args.tp_points,
+                                refresh_daily=not args.offline)
+    except Exception as exc:
+        print(f"Calibration failed: {exc}")
+        return 1
+    print(res.summary)
+    return 0
+
+
+def cmd_morning(args: argparse.Namespace) -> int:
+    """Today's Morning Plan: spread, stop, conviction, trade/skip (+ optional sizing)."""
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.runner import run_morning
+
+    try:
+        res = run_morning(symbol, overnight_range=args.overnight_range, current_price=args.price,
+                          current_spread=s.entry_points, target_dollars=args.target,
+                          dollars_per_point=args.dollars_per_point, max_contracts=args.max_contracts,
+                          date=args.date)
+    except Exception as exc:
+        print(f"Morning plan failed: {exc}")
+        return 1
+    print(res.report_text)
+    print(f"\nReport written to {res.report_path}")
+    return 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     from .selftest import run_selftest
 
@@ -436,6 +471,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--price", type=float, help="pre-open price (for the gap estimate)")
     sp.add_argument("--date", help="ISO date override (default: today)")
     sp.set_defaults(func=cmd_recommend)
+
+    sp = sub.add_parser("calibrate-morning", help="fit the morning model (spread x stop)")
+    sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
+    sp.add_argument("--tp-points", type=float, default=13.3,
+                    help="take-profit distance in points (default 13.3 = $800/3ct NQ)")
+    sp.add_argument("--offline", action="store_true", help="use cached daily data (no Yahoo fetch)")
+    sp.set_defaults(func=cmd_calibrate_morning)
+
+    sp = sub.add_parser("morning", help="today's Morning Plan (spread+stop+conviction+skip)")
+    sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
+    sp.add_argument("--overnight-range", type=float, help="Globex overnight range (points)")
+    sp.add_argument("--price", type=float, help="pre-open price (for the gap estimate)")
+    sp.add_argument("--target", type=float, help="profit target in $ (enables sizing)")
+    sp.add_argument("--max-contracts", type=int, default=10, help="contract cap (default 10)")
+    sp.add_argument("--dollars-per-point", type=float, default=20.0,
+                    help="$/point/contract (NQ=20, MNQ=2)")
+    sp.add_argument("--date", help="ISO date override (default: today)")
+    sp.set_defaults(func=cmd_morning)
 
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)
