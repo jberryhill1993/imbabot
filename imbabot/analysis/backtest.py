@@ -32,6 +32,28 @@ class BracketSpec:
 
 
 @dataclass
+class CostSpec:
+    """Real-world frictions, in index points per contract.
+
+    ``slippage_points`` is the adverse fill slip on a STOP fill — charged on the entry
+    (a stop entry fills past its trigger) and again on a stop-loss exit (stop-market).
+    A take-profit is a LIMIT and does not slip. ``commission_points`` is the round-trip
+    commission per contract expressed in points (commission_$ / $-per-point).
+    """
+
+    slippage_points: float = 0.0
+    commission_points: float = 0.0
+
+
+def _net(gross: float, *, stopped: bool, costs: "CostSpec") -> float:
+    """Net a gross point result for entry slip + commission (+ stop-exit slip)."""
+    pnl = gross - costs.slippage_points - costs.commission_points
+    if stopped:
+        pnl -= costs.slippage_points   # stop-market exit slips too (limit/TP does not)
+    return pnl
+
+
+@dataclass
 class DayOutcome:
     spread: float
     triggered: bool
@@ -43,16 +65,20 @@ class DayOutcome:
 
 def simulate_day(
     day: DayRecord, spread: float, bracket: BracketSpec, tick: float = 0.25,
-    *, fine_grained: bool = False,
+    *, fine_grained: bool = False, costs: Optional[CostSpec] = None,
 ) -> DayOutcome:
-    """Simulate the one-trade straddle for a single day at a single spread.
+    """Simulate the one-trade straddle for a single day at a single spread, net of costs.
 
     ``fine_grained`` (1-second data): the pre-trigger part of the entry bar is
     sub-second, so the entry bar honors actual wicks like every other bar — exact
     whipsaw detection. For coarse 1-minute bars (``False``) the entry-bar stop only
-    counts on a close-through (the pre-trigger minute can't have hit a not-yet-placed
-    stop), which conservatively under-counts winners.
+    counts on a close-through. ``costs`` charges slippage + commission so the P&L is
+    net (slippage hits tight entries hardest — the point that makes ±6 unrealistic).
+
+    Entries fill from the FIRST bar onward; with pre-open bars in the window (negative
+    offsets) a too-tight entry can trip *before* the 09:30 open, exactly as live.
     """
+    costs = costs or CostSpec()
     ref = day.ref_price
     long_stop = round_to_tick(ref + spread, tick)
     short_stop = round_to_tick(ref - spread, tick)
@@ -68,7 +94,8 @@ def simulate_day(
 
         # Both entries inside one bar's range => whipsaw (filled one, stopped other).
         if hit_long and hit_short:
-            return DayOutcome(spread, True, "long", "stop", True, -bracket.stop_points)
+            return DayOutcome(spread, True, "long", "stop", True,
+                              _net(-bracket.stop_points, stopped=True, costs=costs))
 
         side = "long" if hit_long else "short"
         entry = long_stop if hit_long else short_stop
@@ -84,19 +111,24 @@ def simulate_day(
             if side == "long":
                 stopped = (b2.l <= stop_level) if wick else (b2.c <= stop_level)
                 if stopped:
-                    return DayOutcome(spread, True, side, "stop", True, -bracket.stop_points)
+                    return DayOutcome(spread, True, side, "stop", True,
+                                      _net(-bracket.stop_points, stopped=True, costs=costs))
                 if b2.h >= target_level:
-                    return DayOutcome(spread, True, side, "target", False, bracket.target_points)
+                    return DayOutcome(spread, True, side, "target", False,
+                                      _net(bracket.target_points, stopped=False, costs=costs))
             else:
                 stopped = (b2.h >= stop_level) if wick else (b2.c >= stop_level)
                 if stopped:
-                    return DayOutcome(spread, True, side, "stop", True, -bracket.stop_points)
+                    return DayOutcome(spread, True, side, "stop", True,
+                                      _net(-bracket.stop_points, stopped=True, costs=costs))
                 if b2.l <= target_level:
-                    return DayOutcome(spread, True, side, "target", False, bracket.target_points)
+                    return DayOutcome(spread, True, side, "target", False,
+                                      _net(bracket.target_points, stopped=False, costs=costs))
 
-        # Unresolved by window end: mark to the last close.
+        # Unresolved by window end: mark to the last close (flatten at market).
         last_c = bars[-1].c
-        pnl = (last_c - entry) if side == "long" else (entry - last_c)
+        gross = (last_c - entry) if side == "long" else (entry - last_c)
+        pnl = _net(gross, stopped=False, costs=costs)
         return DayOutcome(spread, True, side, "window", pnl < 0, pnl)
 
     return DayOutcome(spread, False, None, "none", False, 0.0)  # spread too wide
@@ -137,13 +169,15 @@ def backtest(
     grid: Optional[List[float]] = None,
     tick: float = 0.25,
     fine_grained: bool = False,
+    costs: Optional[CostSpec] = None,
 ) -> BacktestResult:
     """Sweep ``grid`` across all ``records``; aggregate P&L/whipsaw per spread."""
     grid = grid or spread_grid()
     res = BacktestResult(grid=grid)
 
     for sp in grid:
-        outcomes = [simulate_day(d, sp, bracket, tick, fine_grained=fine_grained) for d in records]
+        outcomes = [simulate_day(d, sp, bracket, tick, fine_grained=fine_grained, costs=costs)
+                    for d in records]
         triggered = [o for o in outcomes if o.triggered]
         res.per_spread[sp] = SpreadStats(
             spread=sp,
@@ -157,7 +191,7 @@ def backtest(
     for d in records:
         best, best_key = None, None
         for sp in grid:
-            o = simulate_day(d, sp, bracket, tick, fine_grained=fine_grained)
+            o = simulate_day(d, sp, bracket, tick, fine_grained=fine_grained, costs=costs)
             key = (o.pnl_points, sp)
             if best_key is None or key > best_key:
                 best_key, best = key, sp
@@ -215,8 +249,9 @@ def backtest_2d(
     stops: Optional[List[float]] = None,
     tick: float = 0.25,
     fine_grained: bool = False,
+    costs: Optional[CostSpec] = None,
 ) -> Backtest2D:
-    """Sweep entry spread x stop distance (TP held at ``target_points``)."""
+    """Sweep entry spread x stop distance (TP held at ``target_points``), net of costs."""
     spreads = spreads or spread_grid()
     stops = stops or stop_grid()
     res = Backtest2D(spreads=spreads, stops=stops, target_points=target_points)
@@ -226,7 +261,8 @@ def backtest_2d(
     for sp in spreads:
         for st in stops:
             br = BracketSpec(stop_points=st, target_points=target_points)
-            outcomes = [simulate_day(d, sp, br, tick, fine_grained=fine_grained) for d in records]
+            outcomes = [simulate_day(d, sp, br, tick, fine_grained=fine_grained, costs=costs)
+                        for d in records]
             grid_outcomes[(sp, st)] = outcomes
             trig = [o for o in outcomes if o.triggered]
             res.cells[(sp, st)] = CellStats(
