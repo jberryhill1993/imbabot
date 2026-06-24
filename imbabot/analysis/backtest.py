@@ -183,6 +183,7 @@ class Backtest2D:
     target_points: float
     cells: Dict[tuple, CellStats] = field(default_factory=dict)        # (spread,stop)->stats
     per_day_optimal: Dict[str, tuple] = field(default_factory=dict)    # date->(spread,stop)
+    per_day_best: Dict[str, DayOutcome] = field(default_factory=dict)  # date->outcome at optimal
 
     def best_cell(self) -> Optional[tuple]:
         """(spread, stop) with the highest mean P&L (tie -> wider spread, wider stop)."""
@@ -234,12 +235,13 @@ def backtest_2d(
             )
 
     for idx, d in enumerate(records):
-        best, best_key = None, None
+        best, best_key, best_outcome = None, None, None
         for sp in spreads:
             for st in stops:
                 o = grid_outcomes[(sp, st)][idx]
                 key = (o.pnl_points, sp, st)   # tie -> wider spread then wider stop
                 if best_key is None or key > best_key:
-                    best_key, best = key, (sp, st)
+                    best_key, best, best_outcome = key, (sp, st), o
         res.per_day_optimal[d.date] = best
+        res.per_day_best[d.date] = best_outcome
     return res

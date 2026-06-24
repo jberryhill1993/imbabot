@@ -58,8 +58,18 @@ def feature_row(
 def row_from_record(
     rec: DayRecord, vix_by_date: Dict[str, DailyBar], nq_bars: List[DailyBar]
 ) -> Dict[str, float]:
-    """Training-time feature row from a cached DayRecord (realized gap/overnight)."""
-    return feature_row(rec.date, rec.overnight_range, rec.gap, vix_by_date, nq_bars)
+    """Training-time feature row from a cached DayRecord.
+
+    Uses the realized gap when the export spans the prior session; otherwise derives
+    it from the prior NQ daily close (Yahoo) so an opening-window-only export still
+    yields a real gap signal.
+    """
+    gap = rec.gap
+    if gap is None:
+        pv = prior_value(by_date(nq_bars), rec.date)
+        if pv is not None:
+            gap = rec.ref_price - pv.c
+    return feature_row(rec.date, rec.overnight_range, gap, vix_by_date, nq_bars)
 
 
 def to_vector(row: Dict[str, float]) -> List[float]:
