@@ -297,7 +297,7 @@ def cmd_probe_history(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest_history(args: argparse.Namespace) -> int:
-    """Ingest a FirstRate-style 1-minute CSV into the analyzer's cached DayRecords."""
+    """Ingest a 1-minute (FirstRate) or 1-second (Databento) CSV into cached DayRecords."""
     from pathlib import Path
 
     if not Path(args.csv).exists():
@@ -305,10 +305,15 @@ def cmd_ingest_history(args: argparse.Namespace) -> int:
         return 1
     s = Settings.load()
     symbol = args.symbol or s.contract_symbol
-    from .analysis.csv_history import ingest_csv, history_path
+    from .analysis.csv_history import history_path
 
-    print(f"Ingesting {args.csv} as {symbol} …")
-    records = ingest_csv(args.csv, symbol, open_minutes=args.open_minutes)
+    print(f"Ingesting {args.csv} as {symbol} ({args.format}) …")
+    if args.format == "databento":
+        from .analysis.databento_csv import ingest_databento_csv
+        records = ingest_databento_csv(args.csv, symbol, open_minutes=args.open_minutes)
+    else:
+        from .analysis.csv_history import ingest_csv
+        records = ingest_csv(args.csv, symbol, open_minutes=args.open_minutes)
     if not records:
         print("No trading days with a 09:30 ET open were found. Check the file/timezone.")
         return 1
@@ -409,9 +414,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--live", action="store_true", help="probe the LIVE data feed (not sim)")
     sp.set_defaults(func=cmd_probe_history)
 
-    sp = sub.add_parser("ingest-history", help="ingest a FirstRate 1-min CSV for the analyzer")
-    sp.add_argument("csv", help="path to the FirstRate (or compatible) 1-minute CSV")
+    sp = sub.add_parser("ingest-history", help="ingest a 1-min (FirstRate) or 1-sec (Databento) CSV")
+    sp.add_argument("csv", help="path to the historical bars CSV")
     sp.add_argument("--symbol", help="symbol label for the cache (default: contract_symbol)")
+    sp.add_argument("--format", choices=["firstrate", "databento"], default="firstrate",
+                    help="CSV format (firstrate=1-min, databento=1-sec ohlcv)")
     sp.add_argument("--open-minutes", type=int, default=15,
                     help="minutes after the open to keep per day (default 15)")
     sp.set_defaults(func=cmd_ingest_history)
