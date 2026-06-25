@@ -16,7 +16,7 @@ from ..config import config_dir
 from .backtest import (BacktestResult, BracketSpec, Backtest2D, CostSpec, backtest,
                        backtest_2d, spread_grid, stop_grid)
 from .csv_history import load_records
-from .features import feature_row, row_from_record
+from .features import feature_row, opening_impulse, row_from_record
 from .market_history import NQ_SYMBOL, VIX_SYMBOL, by_date, load_daily, prior_value, refresh
 from .model import Recommendation, SpreadModel, load_model, save_model
 from .morning import MorningModel, MorningPlan, load_morning_model, save_morning_model
@@ -96,9 +96,14 @@ def calibrate_morning(
     tp_points: float = 13.3,
     slippage_points: float = 2.0,
     commission_points: float = 0.13,
+    spike_window_seconds: int = 3,
     refresh_daily: bool = True,
 ) -> MorningCalibration:
-    """Backtest cached history over spread x stop (NET of costs), fit + save the model."""
+    """Backtest cached history over spread x stop (NET of costs), fit + save the model.
+
+    Also measures each day's opening spike (first ``spike_window_seconds`` of the open) so
+    the Morning Plan can flag the expected 9:30 swing. Advisory only — never changes the bot.
+    """
     records = load_records(symbol)
     if not records:
         raise RuntimeError(f"No cached history for {symbol}. Run ingest-history first.")
@@ -113,7 +118,8 @@ def calibrate_morning(
                      stops=stop_grid(4, 20, 2), fine_grained=fine, costs=costs)
     dates = [r.date for r in records]
     feature_rows = [row_from_record(r, vix_by_date, nq) for r in records]
-    model = MorningModel().fit(feature_rows, dates, bt)
+    impulses = [opening_impulse(r, spike_window_seconds) for r in records]
+    model = MorningModel().fit(feature_rows, dates, bt, impulses=impulses)
     save_morning_model(model)
 
     bc = bt.best_cell()

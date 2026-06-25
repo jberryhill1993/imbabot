@@ -1197,7 +1197,13 @@ class ImbabotGUI:
             # Strip contract month+year suffix so "NQU26" → "NQ", "MNQH26" → "MNQ".
             # History is ingested under the parent symbol, not the specific front month.
             symbol = re.sub(r'[FGHJKMNQUVXZ]\d{2}$', '', raw) or raw
-            res = calibrate_morning(symbol)
+            res = calibrate_morning(
+                symbol,
+                tp_points=self.settings.analysis_tp_points,
+                slippage_points=self.settings.analysis_slippage_points,
+                commission_points=self.settings.analysis_commission_points,
+                spike_window_seconds=self.settings.analysis_spike_window_seconds,
+            )
             self.events.put(("morning_calib", res.summary))
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))
@@ -1247,9 +1253,12 @@ class ImbabotGUI:
         self.btn_mp_recalc.configure(state="normal")
         p = res.plan
         tag = "TRADE" if p.action == "TRADE" else "⚠ SKIP TODAY"
+        spike = ""
+        if getattr(p, "expected_spike_points", 0):
+            spike = f"   ·   open spike ~{p.expected_spike_points:.0f}pt ({p.spike_label.upper()})"
         self.lbl_mp_action.configure(
             text=f"{tag}   ·   spread ±{p.spread:.0f}   stop {p.stop_points:.0f}   "
-                 f"conviction {p.conviction.upper()}   whipsaw {p.whipsaw_risk.upper()}")
+                 f"conviction {p.conviction.upper()}   whipsaw {p.whipsaw_risk.upper()}{spike}")
         self.lbl_mp_detail.configure(text=p.rationale)
         if res.sizing:
             sz = res.sizing

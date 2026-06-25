@@ -39,6 +39,8 @@ class MorningPlan:
     expected_pnl_points: float
     method: str
     rationale: str
+    expected_spike_points: float = 0.0   # predicted 9:30 opening swing (advisory)
+    spike_label: str = "unknown"         # "calm" | "normal" | "violent"
 
 
 @dataclass
@@ -50,12 +52,13 @@ class MorningModel:
     hist_rows: List[List[float]] = field(default_factory=list)   # standardized features/day
     hist_pnl: List[List[float]] = field(default_factory=list)    # day x cell P&L (points)
     hist_whip: List[List[int]] = field(default_factory=list)     # day x cell whipsaw flag
+    hist_impulse: List[float] = field(default_factory=list)      # day -> opening-spike size (pts)
     n_samples: int = 0
     target_points: float = 13.0
 
     # ---- fit ----
     def fit(self, feature_rows: List[Dict[str, float]], dates: List[str],
-            bt: Backtest2D) -> "MorningModel":
+            bt: Backtest2D, impulses: Optional[List[float]] = None) -> "MorningModel":
         self.n_samples = len(feature_rows)
         self.target_points = bt.target_points
         self.cells = [list(c) for c in bt.cells_order]
@@ -66,6 +69,9 @@ class MorningModel:
         self.hist_rows = [[(r[j] - self.means[j]) / self.stds[j] for j in range(len(r))] for r in X]
         self.hist_pnl = [bt.per_day_cell_pnl[d] for d in dates]
         self.hist_whip = [bt.per_day_cell_whip[d] for d in dates]
+        # Opening-spike size per day (advisory). Missing/None -> 0 so indexing stays aligned.
+        self.hist_impulse = [float(v) if v is not None else 0.0
+                             for v in (impulses or [0.0] * len(dates))]
         return self
 
     # ---- predict ----
@@ -107,6 +113,13 @@ class MorningModel:
         whip_rate = statistics.fmean(nb_whip) if nb_whip else 0.0
         exp_pnl = best_mean or 0.0
 
+        # Expected opening spike: average the opening-swing of the same similar mornings.
+        # Advisory only — flags whipsaw risk; NOT used to set the spread (it doesn't predict
+        # the best spread, corr ~0). Bucketed for a plain calm/normal/violent label.
+        spike_vals = [self.hist_impulse[i] for i in nbrs] if self.hist_impulse else []
+        exp_spike = statistics.fmean(spike_vals) if spike_vals else 0.0
+        spike_label = ("calm" if exp_spike < 8 else "normal" if exp_spike < 16 else "violent")
+
         action = "SKIP" if exp_pnl <= 0 else "TRADE"
         conviction = ("high" if (winrate >= 0.6 and whip_rate <= 0.35 and exp_pnl >= 2) else
                       "medium" if (winrate >= 0.5 and exp_pnl > 0) else "low")
@@ -117,17 +130,19 @@ class MorningModel:
             f"On the {len(nbrs)} most-similar mornings (of {self.n_samples}), entry ±{spread:.0f}"
             f"/stop {stop:.0f} (TP {self.target_points:.0f}) averaged {exp_pnl:+.1f} pts, "
             f"win-rate {winrate*100:.0f}%, whipsaw {whip_rate*100:.0f}%. "
+            f"Expected 9:30 opening spike ~{exp_spike:.0f} pts ({spike_label}). "
             f"VIX {row.get('prior_vix', 0):.1f}, ATR14 {row.get('atr14', 0):.0f}, "
             f"events preopen={int(row.get('preopen_score', 0))} fomc={int(row.get('fomc', 0))}."
         )
         return MorningPlan(action, float(spread), float(stop), conviction, confidence,
-                           whipsaw_risk, winrate, exp_pnl, "knn-policy", rationale)
+                           whipsaw_risk, winrate, exp_pnl, "knn-policy", rationale,
+                           expected_spike_points=float(exp_spike), spike_label=spike_label)
 
     # ---- persistence ----
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in (
             "feature_names", "means", "stds", "cells", "hist_rows", "hist_pnl",
-            "hist_whip", "n_samples", "target_points")}
+            "hist_whip", "hist_impulse", "n_samples", "target_points")}
 
     @classmethod
     def from_dict(cls, d: dict) -> "MorningModel":

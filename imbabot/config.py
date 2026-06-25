@@ -100,6 +100,10 @@ class Settings:
     analysis_commission_points: float = 0.13  # round-trip commission/contract in points (~$2.6 NQ)
     analysis_min_spread: float = 10.0        # never recommend an entry tighter than this
     analysis_tp_points: float = 13.3         # take-profit distance the model assumes (pts)
+    # Advisory ONLY (does not affect live trading): how many seconds of the 09:30:00
+    # open to measure the "opening spike" (max swing from the open print). The Morning
+    # Plan predicts today's spike from pre-open conditions to flag whipsaw risk.
+    analysis_spike_window_seconds: int = 3
 
     # --- backend selection ---
     backend: str = "api"              # "api" (ProjectX REST) | "browser" (automation)

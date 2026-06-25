@@ -445,5 +445,28 @@ def run_selftest() -> int:
     _check("morning policy: stormy high-VIX FOMC -> SKIP",
            mm.recommend(_row(29, 1250, 2, 1)).action == "SKIP")
 
+    # 10f) opening-impulse measurement (advisory signal, NOT execution)
+    from .analysis.features import opening_impulse
+    spk = DayRecord(date="s", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21009, 20996, 21008, 1),    # 1st second: +9 up, -4 down -> impulse 9
+        OpenBar(1, 21008, 21012, 21007, 21011, 1),
+        OpenBar(2, 21011, 21013, 21002, 21004, 1)])   # by 3s: high 21013 -> +13 swing
+    _check("opening_impulse = max swing from open in window",
+           opening_impulse(spk, 1) == 9.0, f"got {opening_impulse(spk, 1)}")
+    _check("opening_impulse widens with window",
+           opening_impulse(spk, 3) >= opening_impulse(spk, 1))
+    _check("opening_impulse None with no bars",
+           opening_impulse(DayRecord(date="z", ref_price=1, open_bars=[]), 3) is None)
+
+    # 10g) expected opening spike predicted from similar mornings (calm vs violent)
+    imp = [3.0] * 35 + [22.0] * 35   # calm low-VIX days spike ~3, stormy ~22
+    mm2 = MorningModel().fit(frows, dts, bt2, impulses=imp)
+    calm_plan = mm2.recommend(_row(13, 600))
+    wild_plan = mm2.recommend(_row(29, 1250, 2, 1))
+    _check("expected spike: calm morning small", calm_plan.expected_spike_points < 8,
+           f"got {calm_plan.expected_spike_points}")
+    _check("expected spike: violent morning large + labeled", wild_plan.expected_spike_points > 16
+           and wild_plan.spike_label == "violent", f"got {wild_plan.expected_spike_points}/{wild_plan.spike_label}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
