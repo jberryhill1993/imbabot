@@ -168,7 +168,8 @@ def run_morning(
     else:
         gap = None
     row = feature_row(date, overnight_range, gap, vix_by_date, nq)
-    plan = model.recommend(row, min_spread=min_spread)
+    # Pass the user's actual entry so the go/no-go judges THEIR setting (not the recommended one).
+    plan = model.recommend(row, min_spread=min_spread, user_entry=current_spread)
 
     sizing = None
     if target_dollars:

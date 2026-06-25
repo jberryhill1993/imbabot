@@ -58,10 +58,16 @@ def morning_report(date, plan, row, *, symbol="NQ", sizing=None,
         f"avg best ~{plan.expected_pnl_points:+.1f} pts",
     ]
     if getattr(plan, "expected_spike_points", 0):
-        lines.append(
-            f"  Expected 9:30 opening spike: ~{plan.expected_spike_points:.0f} pts "
-            f"({plan.spike_label.upper()}) — entries tighter than this risk being whipsawed "
-            f"by the open. (Context only; does not set your spread.)")
+        lines += [
+            "",
+            "  Opening-spike go/no-go (advisory):",
+            f"    Expected 9:30 spike ~{plan.expected_spike_points:.0f} pts ({plan.spike_label.upper()})",
+            f"    To hit TP in the opening candle needs ~{plan.spike_needed_points:.0f} pts "
+            f"(your ±entry + TP)  ->  {plan.spike_verdict.upper()}",
+            f"    Widest ±entry whose entry+TP still fits the spike: ±{plan.max_entry_for_spike:.0f} pts",
+            "    (Real fills slip several pts past the stop on a violent open — leave margin. "
+            "Context only; does not change your settings.)",
+        ]
     if current_spread is not None and abs(current_spread - plan.spread) >= 1:
         lines.append(f"  (Your current spread +/- {current_spread:.0f} -> consider {plan.spread:.0f})")
     if sizing is not None:

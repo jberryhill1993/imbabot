@@ -468,5 +468,21 @@ def run_selftest() -> int:
     _check("expected spike: violent morning large + labeled", wild_plan.expected_spike_points > 16
            and wild_plan.spike_label == "violent", f"got {wild_plan.expected_spike_points}/{wild_plan.spike_label}")
 
+    # 10h) go/no-go: spike vs entry(±X)+TP (TP=13.3 from bt2). Violent ~22pt, calm ~3pt.
+    wild_tight = mm2.recommend(_row(29, 1250, 2, 1), user_entry=3)   # need 3+13.3=16.3, +5 margin=21.3
+    wild_wide = mm2.recommend(_row(29, 1250, 2, 1), user_entry=20)   # need 20+13.3=33.3 >> 22
+    calm_tight = mm2.recommend(_row(13, 600), user_entry=3)          # spike ~3 << 16.3
+    _check("go/no-go: violent open + tight entry -> likely",
+           wild_tight.spike_verdict == "likely", f"got {wild_tight.spike_verdict}")
+    _check("go/no-go: violent open + wide entry -> unlikely",
+           wild_wide.spike_verdict == "unlikely", f"got {wild_wide.spike_verdict}")
+    _check("go/no-go: calm open -> unlikely",
+           calm_tight.spike_verdict == "unlikely", f"got {calm_tight.spike_verdict}")
+    _check("go/no-go: needed = entry + TP", abs(wild_tight.spike_needed_points - (3 + 13.3)) < 0.01,
+           f"got {wild_tight.spike_needed_points}")
+    _check("go/no-go: max-fit entry = spike - TP", wild_tight.max_entry_for_spike > 0
+           and abs(wild_tight.max_entry_for_spike - (wild_tight.expected_spike_points - 13.3)) < 0.01,
+           f"got {wild_tight.max_entry_for_spike}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

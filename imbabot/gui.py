@@ -1255,7 +1255,9 @@ class ImbabotGUI:
         tag = "TRADE" if p.action == "TRADE" else "⚠ SKIP TODAY"
         spike = ""
         if getattr(p, "expected_spike_points", 0):
-            spike = f"   ·   open spike ~{p.expected_spike_points:.0f}pt ({p.spike_label.upper()})"
+            spike = (f"   ·   open spike ~{p.expected_spike_points:.0f}pt ({p.spike_label.upper()})"
+                     f" → $TP in candle {p.spike_verdict.upper()} "
+                     f"(need ~{p.spike_needed_points:.0f}pt)")
         self.lbl_mp_action.configure(
             text=f"{tag}   ·   spread ±{p.spread:.0f}   stop {p.stop_points:.0f}   "
                  f"conviction {p.conviction.upper()}   whipsaw {p.whipsaw_risk.upper()}{spike}")

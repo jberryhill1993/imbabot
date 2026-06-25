@@ -25,6 +25,8 @@ from .features import FEATURE_NAMES, to_vector
 from .model import _standardize
 
 MORNING_K = 30          # neighbors averaged per cell (stable with ~250 days)
+SPIKE_SLIP_MARGIN = 5.0  # headroom (pts) the expected spike must clear entry+TP by for a "likely"
+                         # in-candle TP — a violent open fills several pts past the stop (observed ~15pt)
 
 
 @dataclass
@@ -41,6 +43,9 @@ class MorningPlan:
     rationale: str
     expected_spike_points: float = 0.0   # predicted 9:30 opening swing (advisory)
     spike_label: str = "unknown"         # "calm" | "normal" | "violent"
+    spike_needed_points: float = 0.0     # entry(±X) + TP distance to complete in the candle
+    spike_verdict: str = ""              # "likely" | "marginal" | "unlikely" | ""
+    max_entry_for_spike: float = 0.0     # widest ±X whose entry+TP still fits the expected spike
 
 
 @dataclass
@@ -80,7 +85,8 @@ class MorningModel:
                        key=lambda i: math.dist(z, self.hist_rows[i]))
         return order[:min(k, len(order))]
 
-    def recommend(self, row: Dict[str, float], *, min_spread: float = 0.0) -> MorningPlan:
+    def recommend(self, row: Dict[str, float], *, min_spread: float = 0.0,
+                  user_entry: Optional[float] = None) -> MorningPlan:
         if not self.means or not self.cells:
             return MorningPlan("SKIP", 0, 0, "low", "low", "high", 0.0, 0.0,
                                "knn-policy", "No model fitted.")
@@ -120,6 +126,21 @@ class MorningModel:
         exp_spike = statistics.fmean(spike_vals) if spike_vals else 0.0
         spike_label = ("calm" if exp_spike < 8 else "normal" if exp_spike < 16 else "violent")
 
+        # Go/no-go: will the opening spike trigger the entry AND reach the $ TP in the candle?
+        # The trade completes in the spike when one-directional excursion >= entry(±X) + TP.
+        # Real fills slip several points PAST the stop on a violent open (observed ~15pt), so a
+        # thin margin is unreliable -> require SPIKE_SLIP_MARGIN of headroom for a "likely".
+        tp = self.target_points
+        entry_x = float(user_entry) if user_entry else float(spread)
+        spike_needed = entry_x + tp
+        max_entry = max(0.0, exp_spike - tp)         # widest ±X whose entry+TP still fits
+        if exp_spike >= spike_needed + SPIKE_SLIP_MARGIN:
+            spike_verdict = "likely"
+        elif exp_spike >= spike_needed:
+            spike_verdict = "marginal"
+        else:
+            spike_verdict = "unlikely"
+
         action = "SKIP" if exp_pnl <= 0 else "TRADE"
         conviction = ("high" if (winrate >= 0.6 and whip_rate <= 0.35 and exp_pnl >= 2) else
                       "medium" if (winrate >= 0.5 and exp_pnl > 0) else "low")
@@ -130,13 +151,17 @@ class MorningModel:
             f"On the {len(nbrs)} most-similar mornings (of {self.n_samples}), entry ±{spread:.0f}"
             f"/stop {stop:.0f} (TP {self.target_points:.0f}) averaged {exp_pnl:+.1f} pts, "
             f"win-rate {winrate*100:.0f}%, whipsaw {whip_rate*100:.0f}%. "
-            f"Expected 9:30 opening spike ~{exp_spike:.0f} pts ({spike_label}). "
+            f"Expected 9:30 opening spike ~{exp_spike:.0f} pts ({spike_label}); to hit TP in the "
+            f"candle needs ±{entry_x:.0f}+{tp:.0f}={spike_needed:.0f} pts -> {spike_verdict.upper()} "
+            f"(slippage eats several pts past the stop). Widest ±entry that still fits: ±{max_entry:.0f}. "
             f"VIX {row.get('prior_vix', 0):.1f}, ATR14 {row.get('atr14', 0):.0f}, "
             f"events preopen={int(row.get('preopen_score', 0))} fomc={int(row.get('fomc', 0))}."
         )
         return MorningPlan(action, float(spread), float(stop), conviction, confidence,
                            whipsaw_risk, winrate, exp_pnl, "knn-policy", rationale,
-                           expected_spike_points=float(exp_spike), spike_label=spike_label)
+                           expected_spike_points=float(exp_spike), spike_label=spike_label,
+                           spike_needed_points=float(spike_needed), spike_verdict=spike_verdict,
+                           max_entry_for_spike=float(max_entry))
 
     # ---- persistence ----
     def to_dict(self) -> dict:
