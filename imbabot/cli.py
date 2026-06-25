@@ -369,7 +369,6 @@ def cmd_calibrate_morning(args: argparse.Namespace) -> int:
         res = calibrate_morning(symbol, tp_points=(args.tp_points or s.analysis_tp_points),
                                 slippage_points=s.analysis_slippage_points,
                                 commission_points=s.analysis_commission_points,
-                                entry_window_seconds=s.analysis_entry_window_seconds,
                                 refresh_daily=not args.offline)
     except Exception as exc:
         print(f"Calibration failed: {exc}")
