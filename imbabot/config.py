@@ -100,6 +100,10 @@ class Settings:
     analysis_commission_points: float = 0.13  # round-trip commission/contract in points (~$2.6 NQ)
     analysis_min_spread: float = 10.0        # never recommend an entry tighter than this
     analysis_tp_points: float = 13.3         # take-profit distance the model assumes (pts)
+    # Opening-spike strategy: the entry may only TRIGGER within this many seconds of
+    # the 09:30:00 open (1 = only the opening 1-second candle). A triggered trade still
+    # resolves to its TP/SL like the live bot.
+    analysis_entry_window_seconds: int = 1
 
     # --- backend selection ---
     backend: str = "api"              # "api" (ProjectX REST) | "browser" (automation)

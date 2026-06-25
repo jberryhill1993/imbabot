@@ -72,6 +72,7 @@ def simulate_day(
     day: DayRecord, spread: float, bracket: BracketSpec, tick: float = 0.25,
     *, fine_grained: bool = False, costs: Optional[CostSpec] = None,
     entry_mode: str = "stop", limit_tolerance: float = 1.0,
+    entry_window_seconds: Optional[int] = None,
 ) -> DayOutcome:
     """Simulate the one-trade straddle for a single day at a single spread, net of costs.
 
@@ -84,6 +85,15 @@ def simulate_day(
     crossing bar — modeling the adverse selection of limit orders: you skip the violent
     breakouts and only catch the calm ones). The protective stop-loss is a stop-market
     in both modes, so it still slips.
+
+    ``entry_window_seconds``: if set, the entry may only TRIGGER within this many
+    seconds of the 09:30:00 open (``OpenBar.minute`` holds the seconds offset for
+    1-second data). This models the "opening-spike" strategy — only the first
+    ``entry_window_seconds`` candle(s) can put you in; if the spike doesn't reach
+    ±spread by then, there is no trade that day. A triggered position still resolves
+    to its TP/SL over the FULL cached window (the live bot holds to its bracket), so
+    analysis and live execution stay aligned. ``None`` = entry may trigger anytime in
+    the window (the original behavior).
     """
     costs = costs or CostSpec()
     is_limit = entry_mode == "stop_limit"
@@ -96,6 +106,10 @@ def simulate_day(
         return DayOutcome(spread, False, None, "none", False, 0.0)
 
     for i, b in enumerate(bars):
+        # Entry may only trigger inside the opening window (e.g. the first 1s candle).
+        # Past it the spike is over -> no trade. (Resolution below still runs full window.)
+        if entry_window_seconds is not None and b.minute >= entry_window_seconds:
+            break
         hit_long = b.h >= long_stop
         hit_short = b.l <= short_stop
         if not (hit_long or hit_short):
@@ -190,13 +204,15 @@ def backtest(
     tick: float = 0.25,
     fine_grained: bool = False,
     costs: Optional[CostSpec] = None,
+    entry_window_seconds: Optional[int] = None,
 ) -> BacktestResult:
     """Sweep ``grid`` across all ``records``; aggregate P&L/whipsaw per spread."""
     grid = grid or spread_grid()
     res = BacktestResult(grid=grid)
 
     for sp in grid:
-        outcomes = [simulate_day(d, sp, bracket, tick, fine_grained=fine_grained, costs=costs)
+        outcomes = [simulate_day(d, sp, bracket, tick, fine_grained=fine_grained, costs=costs,
+                                 entry_window_seconds=entry_window_seconds)
                     for d in records]
         triggered = [o for o in outcomes if o.triggered]
         res.per_spread[sp] = SpreadStats(
@@ -211,7 +227,8 @@ def backtest(
     for d in records:
         best, best_key = None, None
         for sp in grid:
-            o = simulate_day(d, sp, bracket, tick, fine_grained=fine_grained, costs=costs)
+            o = simulate_day(d, sp, bracket, tick, fine_grained=fine_grained, costs=costs,
+                             entry_window_seconds=entry_window_seconds)
             key = (o.pnl_points, sp)
             if best_key is None or key > best_key:
                 best_key, best = key, sp
@@ -270,6 +287,7 @@ def backtest_2d(
     tick: float = 0.25,
     fine_grained: bool = False,
     costs: Optional[CostSpec] = None,
+    entry_window_seconds: Optional[int] = None,
 ) -> Backtest2D:
     """Sweep entry spread x stop distance (TP held at ``target_points``), net of costs."""
     spreads = spreads or spread_grid()
@@ -281,7 +299,8 @@ def backtest_2d(
     for sp in spreads:
         for st in stops:
             br = BracketSpec(stop_points=st, target_points=target_points)
-            outcomes = [simulate_day(d, sp, br, tick, fine_grained=fine_grained, costs=costs)
+            outcomes = [simulate_day(d, sp, br, tick, fine_grained=fine_grained, costs=costs,
+                                     entry_window_seconds=entry_window_seconds)
                         for d in records]
             grid_outcomes[(sp, st)] = outcomes
             trig = [o for o in outcomes if o.triggered]

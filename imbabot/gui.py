@@ -1197,7 +1197,13 @@ class ImbabotGUI:
             # Strip contract month+year suffix so "NQU26" → "NQ", "MNQH26" → "MNQ".
             # History is ingested under the parent symbol, not the specific front month.
             symbol = re.sub(r'[FGHJKMNQUVXZ]\d{2}$', '', raw) or raw
-            res = calibrate_morning(symbol)
+            res = calibrate_morning(
+                symbol,
+                tp_points=self.settings.analysis_tp_points,
+                slippage_points=self.settings.analysis_slippage_points,
+                commission_points=self.settings.analysis_commission_points,
+                entry_window_seconds=self.settings.analysis_entry_window_seconds,
+            )
             self.events.put(("morning_calib", res.summary))
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))

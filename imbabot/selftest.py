@@ -404,6 +404,25 @@ def run_selftest() -> int:
     _check("stop-limit fill has no entry slippage (beats stop by ~slip)",
            o_calm.pnl_points > o_stop.pnl_points, f"limit={o_calm.pnl_points} stop={o_stop.pnl_points}")
 
+    # 10b3) entry-window: the entry may only trigger inside the opening seconds.
+    # Spike reaches +10 in the first second -> fills and runs to TP.
+    early = DayRecord(date="e", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21011, 20999, 21010, 1),    # +11 in second 0 -> long fills
+        OpenBar(1, 21010, 21025, 21009, 21024, 1)])   # later -> TP +13 = 21023
+    # Calm first second (no ±10 touch), the move only comes at second 2 -> no trade.
+    late = DayRecord(date="l", ref_price=21000, open_bars=[
+        OpenBar(0, 21000, 21004, 20997, 21002, 1),    # only +4 in second 0
+        OpenBar(1, 21002, 21006, 21001, 21005, 1),    # still < +10
+        OpenBar(2, 21005, 21030, 21004, 21029, 1)])   # spike comes too late
+    o_early = simulate_day(early, 10, br, fine_grained=True, entry_window_seconds=1)
+    o_late = simulate_day(late, 10, br, fine_grained=True, entry_window_seconds=1)
+    o_late_full = simulate_day(late, 10, br, fine_grained=True)   # no window -> would trade
+    _check("entry-window: opening-second spike triggers", o_early.triggered)
+    _check("entry-window: spike after the window is skipped (no trade)",
+           not o_late.triggered and o_late.resolved == "none")
+    _check("entry-window: same day WOULD trade without the window",
+           o_late_full.triggered, f"got {o_late_full.resolved}")
+
     # 10c) 2-D backtest: tight spread+stop is the worst whipsaw cell
     rev = DayRecord(date="r", ref_price=21000, open_bars=[
         OpenBar(0, 21000, 21001, 20988, 20990, 1),    # tags 12-spread short

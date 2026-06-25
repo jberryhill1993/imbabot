@@ -96,9 +96,14 @@ def calibrate_morning(
     tp_points: float = 13.3,
     slippage_points: float = 2.0,
     commission_points: float = 0.13,
+    entry_window_seconds: Optional[int] = 1,
     refresh_daily: bool = True,
 ) -> MorningCalibration:
-    """Backtest cached history over spread x stop (NET of costs), fit + save the model."""
+    """Backtest cached history over spread x stop (NET of costs), fit + save the model.
+
+    ``entry_window_seconds`` restricts the entry to trigger only within the opening
+    spike (default 1 = the 09:30:00 candle); a triggered trade still runs to TP/SL.
+    """
     records = load_records(symbol)
     if not records:
         raise RuntimeError(f"No cached history for {symbol}. Run ingest-history first.")
@@ -110,7 +115,8 @@ def calibrate_morning(
     costs = CostSpec(slippage_points=slippage_points, commission_points=commission_points)
     # Coarse step-2 grids keep the per-day-cell matrix the k-NN policy stores compact.
     bt = backtest_2d(records, target_points=tp_points, spreads=spread_grid(6, 28, 2),
-                     stops=stop_grid(4, 20, 2), fine_grained=fine, costs=costs)
+                     stops=stop_grid(4, 20, 2), fine_grained=fine, costs=costs,
+                     entry_window_seconds=entry_window_seconds)
     dates = [r.date for r in records]
     feature_rows = [row_from_record(r, vix_by_date, nq) for r in records]
     model = MorningModel().fit(feature_rows, dates, bt)
@@ -118,8 +124,10 @@ def calibrate_morning(
 
     bc = bt.best_cell()
     res = "1-second (exact whipsaw)" if fine else "1-minute (estimated whipsaw)"
+    win = (f"entry in first {entry_window_seconds}s of the open"
+           if entry_window_seconds is not None else "entry anytime in window")
     profitable = sum(1 for d in dates if bt.per_day_best[d].pnl_points > 0)
-    summary = (f"Morning calibration: {len(records)} days, {res}, NET of "
+    summary = (f"Morning calibration: {len(records)} days, {res}, {win}, NET of "
                f"{slippage_points:.1f}pt slippage + {commission_points:.2f}pt commission. "
                f"Best static cell spread/stop = {bc}. Net-positive days at best cell: "
                f"{profitable}/{len(dates)} ({profitable*100//max(1,len(dates))}%). "
