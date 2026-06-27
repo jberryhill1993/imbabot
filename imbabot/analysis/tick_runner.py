@@ -75,7 +75,9 @@ BIG_MIN = 28.0
 
 @dataclass
 class MorningTickPlan:
-    date: str
+    date: str                  # the trading SESSION the plan is for
+    session_date: str          # same as date (the resolved next open)
+    market_closed_today: bool  # True if "today" was a weekend/holiday
     volatility: str            # LOW | MEDIUM | HIGH | UNKNOWN
     prior_vix: Optional[float]
     news_label: str            # named events with [IMPACT]
@@ -124,7 +126,14 @@ def _features(date: str, prior_vix: Optional[float]) -> dict:
 def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float] = None,
                  dollars_per_point: float = DOLLARS_PER_POINT, max_contracts: int = 10,
                  sl_points: float = DEF_SL, model: Optional[SpikeModel] = None) -> MorningTickPlan:
-    """Assemble the Morning Plan: predict the spike -> volatility, TRADE/NO-TRADE, $TP sizing."""
+    """Assemble the Morning Plan for the next real trading SESSION (``date`` = "as of today";
+    weekends/holidays roll to the next open). Predict the spike -> volatility, TRADE/NO-TRADE, $TP."""
+    from datetime import date as _date
+    from ..market_calendar import is_trading_day, next_trading_session
+    asof = _date.fromisoformat(date)
+    session = next_trading_session(asof)
+    market_closed_today = not is_trading_day(asof)
+    date = session.isoformat()       # predict for the real session, not a closed day
     if prior_vix is None:
         pv = prior_value(by_date(load_daily(VIX_SYMBOL)), date)
         prior_vix = pv.c if pv else None
@@ -153,7 +162,8 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
                      f"Sized to hit ${target_dollars:,.0f}. Note: spike SIZE is predictable; the "
                      f"win/loss on any single day is not — respect the stop.")
     return MorningTickPlan(
-        date=date, volatility=volatility_level(prior_vix, flag.score), prior_vix=prior_vix,
+        date=date, session_date=date, market_closed_today=market_closed_today,
+        volatility=volatility_level(prior_vix, flag.score), prior_vix=prior_vix,
         news_label=flag.label, predicted_spike=S, p_big=pred.p_big, calibrated=model.calibrated,
         decision=decision, conviction=conviction, rationale=rationale, plan=plan)
 

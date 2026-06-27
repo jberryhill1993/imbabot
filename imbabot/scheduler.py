@@ -80,18 +80,19 @@ def next_local_fire(time_str: str, now: Optional[datetime] = None) -> datetime:
 
 
 def next_weekday_local_fire(time_str: str, now: Optional[datetime] = None) -> datetime:
-    """Next Mon–Fri occurrence of a wall-clock time in the MACHINE's local tz.
+    """Next TRADING-DAY occurrence of a wall-clock time in the MACHINE's local tz.
 
-    Like ``next_local_fire`` but rolls forward over Saturday/Sunday, so a daily
-    production schedule fires only on weekdays. (Market *holidays* that fall on a
-    weekday are NOT skipped — there's no calendar — so disarm on those days.)
+    Like ``next_local_fire`` but rolls forward over weekends AND US market holidays
+    (via ``market_calendar``), so a daily production schedule never targets a closed
+    market — e.g. the Friday before a Monday holiday rolls to Tuesday.
     """
+    from .market_calendar import is_trading_day
     t = parse_hms(time_str)
     now = now or datetime.now().astimezone()  # local, tz-aware
     target = now.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
-    while target.weekday() >= 5:      # Sat=5, Sun=6 -> roll to Monday
+    while not is_trading_day(target.date()):   # skip weekends + market holidays
         target += timedelta(days=1)
     return target
 

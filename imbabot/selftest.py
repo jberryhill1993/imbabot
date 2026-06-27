@@ -516,5 +516,31 @@ def run_selftest() -> int:
     _check("spike model: higher VIX -> bigger predicted spike", hi.expected_spike > lo.expected_spike,
            f"lo={lo.expected_spike} hi={hi.expected_spike}")
 
+    # 12) market calendar: weekends + US holidays, next trading session
+    from datetime import date as _date, datetime as _dt, timezone as _tz2, timedelta as _td2
+    from .market_calendar import is_trading_day, next_trading_session, is_holiday
+    _check("calendar: Saturday is not a trading day", not is_trading_day(_date(2026, 6, 27)))
+    _check("calendar: MLK Mon 2026-01-19 is a holiday", is_holiday(_date(2026, 1, 19)))
+    _check("calendar: Good Friday 2026-04-03 is a holiday", is_holiday(_date(2026, 4, 3)))
+    _check("calendar: normal weekday trades", is_trading_day(_date(2026, 6, 29)))
+    _check("calendar: Sat -> next session Monday",
+           next_trading_session(_date(2026, 6, 27)) == _date(2026, 6, 29))
+    _check("calendar: rolls over a holiday (Jul 3 obs -> Jul 6)",
+           next_trading_session(_date(2026, 7, 3)) == _date(2026, 7, 6))
+
+    # 12b) auto-fire skips holidays: Fri 2026-01-16 after the time -> Tue (MLK Mon skipped)
+    from .scheduler import next_weekday_local_fire
+    fri = _dt(2026, 1, 16, 12, 0, 0, tzinfo=_tz2(_td2(hours=-5)))
+    nf = next_weekday_local_fire("08:31:00", now=fri)
+    _check("auto-fire skips weekend+MLK holiday -> Tuesday",
+           nf.date() == _date(2026, 1, 20), f"got {nf.date()}")
+
+    # 12c) morning_plan resolves a closed day to the next session
+    from .analysis.tick_runner import morning_plan
+    mp = morning_plan("2026-06-27", target_dollars=800.0)   # a Saturday
+    _check("morning plan: closed day -> next session + flag",
+           mp.session_date == "2026-06-29" and mp.market_closed_today,
+           f"got {mp.session_date}/{mp.market_closed_today}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

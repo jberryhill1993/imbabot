@@ -660,22 +660,22 @@ class ImbabotGUI:
         self.btn_mp_recalc = ttk.Button(tab, text="↻ Recalculate now",
                                         command=self._on_morning_recalc, style="Accent.TButton")
         self.btn_mp_recalc.grid(row=15, column=2, sticky="w", padx=6, pady=(6, 0))
-        self.btn_mp_calib = ttk.Button(tab, text="Ingest tick data…",
-                                       command=self._on_morning_calibrate, style="Ghost.TButton")
-        self.btn_mp_calib.grid(row=15, column=3, sticky="w", pady=(6, 0))
-        self.lbl_mp_detail = ttk.Label(
-            tab, text="Enter a profit-target $, then Recalculate for the volatility level + suggested "
-                      "contracts/spread. (Predictor is uncalibrated until a full tick history is ingested.)",
-            style="Sm.TLabel", wraplength=860)
-        self.lbl_mp_detail.grid(row=16, column=0, columnspan=5, sticky="w", pady=(6, 0))
-        ttk.Label(tab, text="Profit target $", style="Sm.TLabel").grid(row=17, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(tab, text="Profit target $", style="Sm.TLabel").grid(row=16, column=0, sticky="w", pady=(8, 0))
         self.var_mp_target = tk.StringVar(value="800")
         ttk.Entry(tab, textvariable=self.var_mp_target, width=10, font=(FONT, 11)).grid(
-            row=17, column=1, sticky="w", padx=6, pady=(8, 0))
-        ttk.Label(tab, text="(drives suggested contracts + entry spread on Recalculate)",
-                  style="Hint.TLabel").grid(row=17, column=2, columnspan=3, sticky="w", pady=(8, 0))
+            row=16, column=1, sticky="w", padx=6, pady=(8, 0))
+        ttk.Label(tab, text="(drives the contracts + entry spread below on Recalculate)",
+                  style="Hint.TLabel").grid(row=16, column=2, columnspan=3, sticky="w", pady=(8, 0))
+        # The one line that tells the user exactly what to type into Entry Points + Contracts.
+        self.lbl_mp_inputs = ttk.Label(tab, text="", style="Hs.TLabel", foreground=GREEN_H)
+        self.lbl_mp_inputs.grid(row=17, column=0, columnspan=5, sticky="w", pady=(8, 0))
         self.lbl_mp_sizing = ttk.Label(tab, text="", style="Sm.TLabel", wraplength=860)
-        self.lbl_mp_sizing.grid(row=18, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.lbl_mp_sizing.grid(row=18, column=0, columnspan=5, sticky="w", pady=(2, 0))
+        self.lbl_mp_detail = ttk.Label(
+            tab, text="Enter a profit-target $, then Recalculate for the volatility, predicted spike, "
+                      "TRADE/NO-TRADE, and the contracts + entry spread to use.",
+            style="Sm.TLabel", wraplength=860)
+        self.lbl_mp_detail.grid(row=19, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     def _build_tab_test(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
@@ -1185,14 +1185,8 @@ class ImbabotGUI:
             self._update_vix(evt[1])
         elif kind == "morning_plan":
             self._show_morning_plan(evt[1])
-        elif kind == "morning_calib":
-            self.btn_mp_calib.configure(state="normal")
-            self.lbl_mp_detail.configure(text=evt[1])
-            self.log(evt[1])
-            self._grow_to_content()
         elif kind == "morning_error":
             self.btn_mp_recalc.configure(state="normal")
-            self.btn_mp_calib.configure(state="normal")
             self.lbl_mp_action.configure(text="—")
             self.lbl_mp_detail.configure(text=f"Morning Plan error: {evt[1]}")
             self.log(f"morning plan: {evt[1]}", "error")
@@ -1200,38 +1194,6 @@ class ImbabotGUI:
             self.log(evt[1], "error")
 
     # ---------------------------------------------------- Morning Plan (advisory)
-    def _on_morning_calibrate(self) -> None:
-        """Ingest a Databento tbbo tick zip (replaces the old 12-month calibration)."""
-        path = filedialog.askopenfilename(
-            title="Select Databento tbbo tick zip",
-            filetypes=[("Zip", "*.zip"), ("All files", "*.*")])
-        if not path:
-            return
-        self.btn_mp_calib.configure(state="disabled")
-        self.lbl_mp_detail.configure(text="Ingesting tick data…")
-        threading.Thread(target=self._morning_calib_worker, args=(path,), daemon=True).start()
-
-    def _morning_calib_worker(self, path: str) -> None:
-        try:
-            from .analysis.tick_data import ingest_tbbo_zip
-            from .analysis.tick_dataset import build_dataset
-            from .analysis.spike_model import SpikeModel, save_spike_model
-            from .analysis.walkforward import evaluate
-            days = ingest_tbbo_zip(path)
-            if not days:
-                self.events.put(("morning_calib", "No tbbo files found in that zip."))
-                return
-            rows = build_dataset()
-            save_spike_model(SpikeModel().fit(rows))
-            v = evaluate(rows, warm=60, k=25, spike_min=20)
-            verdict = "edge CONFIRMED" if v.edge else "no validated edge (context only)"
-            self.events.put(("morning_calib",
-                f"Ingested {len(days)} days, fitted predictor on {len(rows)}. Walk-forward: spike "
-                f"corr {v.spike_corr:+.2f}, TRADE-days net ${v.sel_net:+.0f}/day vs baseline "
-                f"${v.base_net:+.0f} — {verdict}. Click Recalculate."))
-        except Exception as exc:
-            self.events.put(("morning_error", str(exc)))
-
     def _on_morning_recalc(self) -> None:
         self.btn_mp_recalc.configure(state="disabled")
         self.lbl_mp_action.configure(text="… calculating …")
@@ -1241,7 +1203,6 @@ class ImbabotGUI:
         try:
             from datetime import datetime
             from .analysis.tick_runner import morning_plan
-            from .analysis.tick_data import cached_dates
             target = 800.0
             t = self.var_mp_target.get().strip()
             if t:
@@ -1254,35 +1215,45 @@ class ImbabotGUI:
                 c = getattr(self.engine, "contract", None)
                 if c and c.tick_size:
                     dpp = c.tick_value / c.tick_size
-            cd = cached_dates()
-            date = cd[-1] if cd else datetime.now().astimezone().date().isoformat()
-            mp = morning_plan(date, target_dollars=target, dollars_per_point=dpp,
+            # "as of today" -> morning_plan rolls weekends/holidays to the next real session.
+            today = datetime.now().astimezone().date().isoformat()
+            mp = morning_plan(today, target_dollars=target, dollars_per_point=dpp,
                               max_contracts=self.settings.max_contracts)
             self.events.put(("morning_plan", mp))
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))
 
     def _show_morning_plan(self, mp) -> None:
+        from datetime import date as _date
         self.btn_mp_recalc.configure(state="normal")
         tag = "✅ TRADE" if mp.decision == "TRADE" else "⛔ NO-TRADE"
-        cal = "" if mp.calibrated else "   ·   UNCALIBRATED (Ingest tick data first)"
+        try:
+            sess = _date.fromisoformat(mp.session_date).strftime("%a %b %d")
+        except Exception:
+            sess = mp.session_date
+        banner = "  ·  ⚠ MARKET CLOSED TODAY — plan is for the NEXT session" if mp.market_closed_today else ""
+        cal = "" if mp.calibrated else "  ·  UNCALIBRATED"
         self.lbl_mp_action.configure(
-            text=f"{tag}  ·  {mp.conviction}  ·  Vol {mp.volatility}  ·  "
-                 f"predicted spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{cal}")
+            text=f"{tag}  ·  {mp.conviction}  ·  Session: {sess}  ·  Vol {mp.volatility}  ·  "
+                 f"spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{banner}{cal}")
         p = mp.plan
-        if p.feasible:
+        # Prominent, unambiguous: exactly what to type into the Entry Points + Contracts boxes.
+        if mp.decision == "TRADE" and p.feasible:
+            self.lbl_mp_inputs.configure(
+                text=f"➡  ENTER IN BOT    Entry Points:  {p.entry_spread:.0f}      "
+                     f"Contracts:  {p.contracts}{'  (capped)' if p.capped else ''}",
+                foreground=GREEN_H)
             self.lbl_mp_sizing.configure(
-                text=f"TP ${p.target_dollars:,.0f}  ->  {p.contracts} contract(s) at entry "
-                     f"+/-{p.entry_spread:.0f}   ·   TP {p.tp_distance_points:.0f}pt "
-                     f"(${p.achievable_dollars:,.0f}) / SL ${p.sl_bracket_dollars:,.0f}"
-                     f"{'  (capped at max_contracts)' if p.capped else ''}")
+                text=f"TP ${p.target_dollars:,.0f} reached at {p.tp_distance_points:.0f}pt "
+                     f"(~${p.achievable_dollars:,.0f}); stop loses ~${p.sl_bracket_dollars:,.0f}.")
         else:
-            self.lbl_mp_sizing.configure(text="(no size — NO-TRADE)")
+            self.lbl_mp_inputs.configure(text="➡  NO-TRADE — sit out today", foreground=RED_H)
+            self.lbl_mp_sizing.configure(text="")
         vix = f"VIX {mp.prior_vix:.1f}" if mp.prior_vix else "VIX n/a"
         self.lbl_mp_detail.configure(
-            text=f"{mp.date}  ·  {vix}  ·  News: {mp.news_label}\n{mp.rationale}")
-        self.log(f"Morning Plan {mp.date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
-                 f"-> {p.contracts if p.feasible else 0}ct")
+            text=f"{vix}  ·  News: {mp.news_label}\n{mp.rationale}")
+        self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
+                 f"-> {p.contracts if (mp.decision=='TRADE' and p.feasible) else 0}ct")
         self._grow_to_content()
 
     def _append_log(self, line: str, level: str = "info") -> None:
