@@ -397,6 +397,32 @@ def cmd_morning(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_analyze_ticks(args: argparse.Namespace) -> int:
+    """Tick-data Morning analysis: ingest tbbo ticks, simulate the straddle, report."""
+    from .analysis.tick_runner import analyze_ticks, analysis_report, morning_plan
+
+    actual = {"2026-06-22": -540, "2026-06-25": -510}   # the user's known trades (sample)
+    try:
+        rows = analyze_ticks(args.source)
+    except Exception as exc:
+        print(f"Tick analysis failed: {exc}")
+        return 1
+    print(analysis_report(rows, actual=actual))
+    if args.target and rows:
+        mp = morning_plan(rows[-1].date, target_dollars=args.target,
+                          max_contracts=args.max_contracts)
+        p = mp.plan
+        print(f"\nMorning Plan demo ({rows[-1].date}, TP ${args.target:,.0f}):")
+        print(f"  Volatility: {mp.volatility}   predicted spike ~{mp.predicted_spike:.0f} pts "
+              f"({'calibrated' if mp.calibrated else 'UNCALIBRATED - needs full history'})")
+        if p.feasible:
+            print(f"  -> entry +/-{p.entry_spread:.0f}, {p.contracts} contract(s), "
+                  f"TP {p.tp_distance_points:.0f}pt = ${p.achievable_dollars:,.0f}, "
+                  f"SL ${p.sl_bracket_dollars:,.0f}")
+        print(f"  {p.note}")
+    return 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     from .selftest import run_selftest
 
@@ -492,6 +518,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="$/point/contract (NQ=20, MNQ=2)")
     sp.add_argument("--date", help="ISO date override (default: today)")
     sp.set_defaults(func=cmd_morning)
+
+    sp = sub.add_parser("analyze-ticks", help="tick-data Morning analysis (tbbo zip/dir)")
+    sp.add_argument("source", nargs="?", help="Databento tbbo zip to ingest (default: cached ticks)")
+    sp.add_argument("--target", type=float, help="profit target $ for the Morning Plan demo")
+    sp.add_argument("--max-contracts", type=int, default=10, help="contract cap (default 10)")
+    sp.set_defaults(func=cmd_analyze_ticks)
 
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)

@@ -484,5 +484,62 @@ def run_selftest() -> int:
            and abs(wild_tight.max_entry_for_spike - (wild_tight.expected_spike_points - 13.3)) < 0.01,
            f"got {wild_tight.max_entry_for_spike}")
 
+    # 11) TICK engine: the core fix is resolving TP vs SL in true time order.
+    from .analysis.tick_data import TickDay, Tick
+    from .analysis.tick_sim import simulate_tick_straddle
+    from .analysis.tick_features import label_day, volatility_level
+    from .analysis.sizing import tp_plan_from_spike
+
+    def _td(rows):  # rows = (t, price, bid, ask)
+        return TickDay("t", "NQ", [Tick(*r) for r in rows])
+
+    # 11a) TP printed BEFORE SL in time -> target (a 1-sec OHLCV bar would wrongly stop:
+    # its high(105.5) and low(99) both inside one bar, adverse-first rule = stop).
+    tp_first = _td([(-3, 100, 99.75, 100.25), (0, 100, 99.75, 100.25),
+                    (1, 102, 101.75, 102.25),     # long triggers, fills ask 102.25
+                    (2, 105.5, 105.25, 105.75),   # TP = 102.25+3 = 105.25 -> hit
+                    (3, 99, 98.75, 99.25)])        # SL would be here, but LATER
+    o = simulate_tick_straddle(tp_first, entry_points=2, tp_points=3, sl_points=2)
+    _check("tick: TP-before-SL resolves to target", o.side == "long" and o.resolved == "target",
+           f"got {o.side}/{o.resolved}")
+
+    # 11b) SL printed BEFORE TP -> stop
+    sl_first = _td([(-3, 100, 99.75, 100.25), (0, 100, 99.75, 100.25),
+                    (1, 102, 101.75, 102.25),     # long entry 102.25
+                    (2, 99, 98.75, 99.25),        # SL 100.25 -> hit first
+                    (3, 106, 105.75, 106.25)])     # TP later
+    o = simulate_tick_straddle(sl_first, entry_points=2, tp_points=3, sl_points=2)
+    _check("tick: SL-before-TP resolves to stop", o.resolved == "stop", f"got {o.resolved}")
+
+    # 11c) short whipsaw: triggers short, reverses up into the stop (the Jun-25 shape)
+    whip = _td([(-3, 100, 99.75, 100.25), (0, 100, 99.75, 100.25),
+                (1, 98, 97.75, 98.25),            # short triggers, fills bid 97.75
+                (2, 100.5, 100.25, 100.75)])       # SL = 97.75+2 = 99.75 -> stop
+    o = simulate_tick_straddle(whip, entry_points=2, tp_points=3, sl_points=2)
+    _check("tick: short whipsaw -> stop, labeled whipsaw",
+           o.side == "short" and o.resolved == "stop" and label_day(o) == "whipsaw",
+           f"got {o.side}/{o.resolved}/{label_day(o)}")
+
+    # 11d) no touch -> no trade
+    calm = _td([(-3, 100, 99.75, 100.25), (0, 100.5, 100.25, 100.75), (1, 99.5, 99.25, 99.75)])
+    o = simulate_tick_straddle(calm, entry_points=2, tp_points=3, sl_points=2)
+    _check("tick: no touch -> no trade", not o.triggered and label_day(o) == "no-trade")
+
+    # 11e) TP-driven sizing from a predicted spike
+    sp = tp_plan_from_spike(20.0, 800.0, dollars_per_point=20.0, max_contracts=10,
+                            counter_poke=4.0, slip_margin=3.0, min_spread=5.0)
+    _check("sizing: spike 20 -> entry +/-5, feasible", sp.feasible and sp.entry_spread == 5.0,
+           f"got {sp.entry_spread}/{sp.feasible}")
+    _check("sizing: contracts = ceil(TP$/(T*$pt))", sp.contracts == 4,
+           f"got {sp.contracts} (T={sp.tp_distance_points})")
+    small = tp_plan_from_spike(6.0, 800.0, slip_margin=3.0, min_spread=5.0)
+    _check("sizing: tiny spike -> not feasible", not small.feasible)
+
+    # 11f) volatility bands + news bump
+    _check("vol: low VIX -> LOW", volatility_level(12.0, 0) == "LOW")
+    _check("vol: mid VIX -> MEDIUM", volatility_level(18.0, 0) == "MEDIUM")
+    _check("vol: high VIX -> HIGH", volatility_level(25.0, 0) == "HIGH")
+    _check("vol: news bumps a band", volatility_level(14.0, 2) == "MEDIUM")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
