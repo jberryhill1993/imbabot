@@ -1,16 +1,15 @@
-"""US economic-event calendar for the spread analyzer.
+"""US economic-event calendar with IMPACT LEVELS (ForexFactory-style) for the Morning Plan.
 
-Classifies each trading day by the scheduled macro releases that move the open:
-- **Pre-open releases** (08:30 ET — one hour before the 09:30 cash open) directly
-  inflate the opening candle: monthly **NFP** (first Friday), weekly **jobless claims**
-  (Thursday), and **CPI/PPI**. NFP and jobless are derived by rule; CPI/PPI come from
-  the bundled curated list (``data/econ_events.json``).
-- **Same-day** events that don't hit the open but raise the regime: **FOMC** (decision
-  at 14:00 ET), from the curated list.
+Classifies each trading day by the scheduled macro releases that move the open and tags each
+with an impact level (high/medium/low):
+- **Pre-open releases** (08:30 ET, ~1h before the 09:30 cash open) inflate the opening spike:
+  monthly **NFP** (first Friday, HIGH, derived), weekly **jobless claims** (Thursday, LOW, derived),
+  and curated **CPI / Core PCE / PPI / Retail Sales / GDP** from ``data/econ_events.json``.
+- **Same-day regime** events: **FOMC** decision (14:00 ET, HIGH) and **ISM** (10:00 ET) — they don't
+  hit the 08:30 open but raise the day's volatility regime.
 
-``event_flag(date)`` returns an :class:`EventFlag` with both a human label and numeric
-features (``preopen_score``, ``fomc``) the spread model keys off. The curated JSON is
-refreshable; the derived rules always work even if the JSON is stale.
+``event_flag(date)`` returns named events + impact + numeric scores the predictor keys off.
+Curated dates come from BLS/BEA/FRB schedules (or forexfactory.com); the derived rules always work.
 """
 from __future__ import annotations
 
@@ -19,13 +18,23 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-_PREOPEN_IMPACT = {"high": 2, "medium": 1, "low": 1}
+_IMPACT_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
+# Curated event types -> (display name, impact, time_et, pre_open?). Dates live in the JSON.
+_CURATED = {
+    "fomc":   ("FOMC decision", "high", "14:00", False),
+    "cpi":    ("CPI", "high", "08:30", True),
+    "pce":    ("Core PCE Price Index", "high", "08:30", True),
+    "ppi":    ("PPI", "medium", "08:30", True),
+    "retail": ("Retail Sales", "medium", "08:30", True),
+    "gdp":    ("GDP", "medium", "08:30", True),
+    "ism_mfg": ("ISM Manufacturing PMI", "medium", "10:00", False),
+    "ism_svc": ("ISM Services PMI", "medium", "10:00", False),
+}
 
 
 def _data_path() -> Path:
-    """Locate econ_events.json from source or a frozen exe (mirrors browser packs)."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS) / "imbabot" / "analysis" / "data" / "econ_events.json"
     return Path(__file__).with_name("data") / "econ_events.json"
@@ -52,55 +61,70 @@ def _first_friday(year: int, month: int) -> date:
 @dataclass
 class EventFlag:
     date: str
-    labels: List[str] = field(default_factory=list)
-    preopen_score: int = 0     # 0 none, 1 medium (jobless/PPI), 2 high (NFP/CPI)
-    fomc: bool = False         # FOMC decision day (same-day regime, not pre-open)
+    events: List[Tuple[str, str, str, bool]] = field(default_factory=list)  # (name, impact, time_et, preopen)
 
     @property
     def has_event(self) -> bool:
-        return bool(self.labels)
+        return bool(self.events)
+
+    @property
+    def labels(self) -> List[str]:
+        return [e[0] for e in self.events]
 
     @property
     def label(self) -> str:
-        return ", ".join(self.labels) if self.labels else "none"
+        if not self.events:
+            return "none"
+        return ", ".join(f"{n} [{imp.upper()}]" for n, imp, _t, _p in self.events)
+
+    @property
+    def max_impact(self) -> str:
+        if not self.events:
+            return "none"
+        return max((e[1] for e in self.events), key=lambda i: _IMPACT_RANK.get(i, 0))
+
+    @property
+    def preopen_impact(self) -> str:
+        """Highest impact among events that hit BEFORE the 09:30 open (08:30 releases)."""
+        pre = [e[1] for e in self.events if e[3]]
+        return max(pre, key=lambda i: _IMPACT_RANK.get(i, 0)) if pre else "none"
+
+    @property
+    def preopen_score(self) -> int:
+        return _IMPACT_RANK.get(self.preopen_impact, 0)
+
+    @property
+    def fomc(self) -> bool:
+        return any("FOMC" in e[0] for e in self.events)
 
     @property
     def score(self) -> int:
-        """Combined intensity for the model/report (pre-open weighted, FOMC adds 1)."""
-        return min(3, self.preopen_score + (1 if self.fomc else 0))
+        """Combined catalyst intensity 0-3 (pre-open weighted; FOMC/high regime adds)."""
+        return min(3, max(self.preopen_score, _IMPACT_RANK.get(self.max_impact, 0)))
 
 
 def event_flag(d: str) -> EventFlag:
-    """Classify the macro events scheduled for ISO date ``d`` (YYYY-MM-DD)."""
+    """Classify the macro events scheduled for ISO date ``d`` (YYYY-MM-DD), with impact levels."""
     data = _load()
     dt = datetime.strptime(d, "%Y-%m-%d").date()
     flag = EventFlag(date=d)
 
-    # --- derived regular releases (08:30 ET, pre-open) ---
+    # --- derived regular releases ---
     if dt == _first_friday(dt.year, dt.month):
-        flag.labels.append("NFP (08:30)")
-        flag.preopen_score = max(flag.preopen_score, 2)
+        flag.events.append(("Nonfarm Payrolls", "high", "08:30", True))
     if dt.weekday() == 3:  # Thursday
-        flag.labels.append("Jobless claims (08:30)")
-        flag.preopen_score = max(flag.preopen_score, 1)
+        flag.events.append(("Jobless Claims", "low", "08:30", True))
 
-    # --- curated irregular releases ---
-    for key in ("cpi", "ppi"):
+    # --- curated irregular releases (dates in JSON) ---
+    for key, (name, impact, time_et, preopen) in _CURATED.items():
         block = data.get(key) or {}
         if d in (block.get("dates") or []):
-            impact = block.get("impact", "high")
-            flag.labels.append(f"{key.upper()} ({block.get('time_et', '08:30')})")
-            flag.preopen_score = max(flag.preopen_score, _PREOPEN_IMPACT.get(impact, 2))
-
-    fomc = data.get("fomc") or {}
-    if d in (fomc.get("dates") or []):
-        flag.fomc = True
-        flag.labels.append(f"FOMC ({fomc.get('time_et', '14:00')})")
+            imp = block.get("impact", impact)
+            flag.events.append((name, imp, block.get("time_et", time_et), preopen))
 
     return flag
 
 
 def upcoming_fomc(after: str, limit: int = 1) -> List[str]:
-    """Next FOMC decision dates on/after ISO date ``after`` (for the report)."""
     dates = sorted((_load().get("fomc") or {}).get("dates") or [])
     return [d for d in dates if d >= after][:limit]

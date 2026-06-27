@@ -479,5 +479,42 @@ def run_selftest() -> int:
     _check("vol: high VIX -> HIGH", volatility_level(25.0, 0) == "HIGH")
     _check("vol: news bumps a band", volatility_level(14.0, 2) == "MEDIUM")
 
+    # 11g) entry floor 10 + scale-contracts-to-spike + NO-TRADE on too-small
+    big = tp_plan_from_spike(35.0, 800.0, min_spread=10.0)        # big spike -> few contracts
+    _check("sizing: entry floor 10 (big spike)", big.feasible and big.entry_spread == 10.0)
+    _check("sizing: big spike -> few contracts", big.contracts <= 3, f"got {big.contracts}")
+    smallsp = tp_plan_from_spike(16.0, 800.0, min_spread=10.0)    # small spike -> scale UP
+    _check("sizing: small spike scales contracts up", smallsp.feasible and smallsp.contracts > big.contracts,
+           f"small={smallsp.contracts} big={big.contracts}")
+    notrade = tp_plan_from_spike(12.0, 800.0, min_spread=10.0)    # too small -> NO-TRADE
+    _check("sizing: too-small spike -> NO-TRADE", not notrade.feasible)
+
+    # 11h) news calendar impact levels
+    from .analysis import calendar as econ
+    _check("calendar: NFP first Friday HIGH",
+           any("Nonfarm" in n and imp == "high" for n, imp, *_ in econ.event_flag("2026-06-05").events))
+    _check("calendar: Thursday jobless LOW",
+           any("Jobless" in n and imp == "low" for n, imp, *_ in econ.event_flag("2026-06-25").events))
+    _check("calendar: FOMC flag", econ.event_flag("2025-07-30").fomc)
+
+    # 11i) spike model fit + predict round-trip (synthetic: high VIX -> bigger spike)
+    from .analysis.spike_model import SpikeModel
+    from .analysis.tick_dataset import DayRow
+    syn = []
+    for i in range(40):
+        vix = 12.0 + (i % 20)          # spread of regimes
+        thrust = vix * 1.5             # bigger VIX -> bigger spike (learnable)
+        syn.append(DayRow(date=f"d{i}", feats={"prior_vix": vix, "vix_change": 0.0, "news_score": 0.0,
+                          "fomc": 0.0, "dow": float(i % 5), "recent_thrust": thrust},
+                          thrust=thrust, counter_poke=2.0, is_big=1 if thrust >= 30 else 0,
+                          label="clean-winner" if thrust >= 20 else "whipsaw", pnl_points=0.0,
+                          news_label="none", prior_vix=vix))
+    mdl = SpikeModel().fit(syn)
+    lo = mdl.predict({"prior_vix": 13.0, "vix_change": 0.0, "news_score": 0.0, "fomc": 0.0, "dow": 1.0, "recent_thrust": 19.5})
+    hi = mdl.predict({"prior_vix": 29.0, "vix_change": 0.0, "news_score": 0.0, "fomc": 0.0, "dow": 1.0, "recent_thrust": 43.5})
+    _check("spike model: calibrated after fit", mdl.calibrated and hi.calibrated)
+    _check("spike model: higher VIX -> bigger predicted spike", hi.expected_spike > lo.expected_spike,
+           f"lo={lo.expected_spike} hi={hi.expected_spike}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

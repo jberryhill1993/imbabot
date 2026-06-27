@@ -67,35 +67,95 @@ def analyze_ticks(source: Optional[str | Path] = None, **kw) -> List[TickDayAnal
 
 
 # ----------------------------------------------------------------- Morning Plan
+# Validated thresholds (full-year walk-forward): predicted spike >= TRADE_MIN beats the
+# trade-all baseline OOS; >= BIG_MIN flags the high-conviction 30+ pt "money days".
+TRADE_MIN = 18.0
+BIG_MIN = 28.0
+
+
 @dataclass
 class MorningTickPlan:
     date: str
     volatility: str            # LOW | MEDIUM | HIGH | UNKNOWN
     prior_vix: Optional[float]
-    news_label: str
-    predicted_spike: float     # points
+    news_label: str            # named events with [IMPACT]
+    predicted_spike: float     # points (first ~2s thrust)
+    p_big: float               # P(30+ pt spike)
     calibrated: bool           # False until fit on full tick history
+    decision: str              # TRADE | NO-TRADE
+    conviction: str            # STRONG | MODERATE | LOW
+    rationale: str
     plan: SpikePlan
 
 
+def _recent_thrust(date: str, k: int = 10) -> float:
+    """Mean opening thrust of the last ``k`` cached tick days before ``date`` (regime feature)."""
+    prior = [d for d in cached_dates() if d < date][-k:]
+    vals = []
+    for d in prior:
+        td = load_tickday(d)
+        if td:
+            sm = spike_metrics(td, window_s=2.0)
+            if sm:
+                vals.append(sm.thrust)
+    return sum(vals) / len(vals) if vals else 14.0
+
+
+def _features(date: str, prior_vix: Optional[float]) -> dict:
+    from datetime import date as _d
+    flag = econ.event_flag(date)
+    vbd = by_date(load_daily(VIX_SYMBOL))
+    pv = prior_value(vbd, date)
+    vix_change = 0.0
+    if pv:
+        pv2 = prior_value(vbd, pv.date)
+        if pv2:
+            vix_change = pv.c - pv2.c
+    return {
+        "prior_vix": float(prior_vix) if prior_vix is not None else 17.0,
+        "vix_change": float(vix_change),
+        "news_score": float(flag.score),
+        "fomc": 1.0 if flag.fomc else 0.0,
+        "dow": float(_d.fromisoformat(date).weekday()),
+        "recent_thrust": _recent_thrust(date),
+    }
+
+
 def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float] = None,
-                 news_score: Optional[int] = None, dollars_per_point: float = DOLLARS_PER_POINT,
-                 max_contracts: int = 10, sl_points: float = DEF_SL,
-                 model: Optional[SpikeModel] = None) -> MorningTickPlan:
-    """Assemble the Morning Plan: volatility level + $TP-driven contracts/spread."""
+                 dollars_per_point: float = DOLLARS_PER_POINT, max_contracts: int = 10,
+                 sl_points: float = DEF_SL, model: Optional[SpikeModel] = None) -> MorningTickPlan:
+    """Assemble the Morning Plan: predict the spike -> volatility, TRADE/NO-TRADE, $TP sizing."""
     if prior_vix is None:
         pv = prior_value(by_date(load_daily(VIX_SYMBOL)), date)
         prior_vix = pv.c if pv else None
     flag = econ.event_flag(date)
-    if news_score is None:
-        news_score = flag.score
     model = model or load_spike_model()
-    S = model.predict(prior_vix, news_score)
+    feats = _features(date, prior_vix)
+    pred = model.predict(feats)
+    S = pred.expected_spike
     plan = tp_plan_from_spike(S, target_dollars, dollars_per_point=dollars_per_point,
-                              max_contracts=max_contracts, sl_points=sl_points)
+                              max_contracts=max_contracts, sl_points=sl_points, min_spread=10.0)
+
+    # TRADE/NO-TRADE by predicted spike SIZE (the walk-forward-validated signal). Win/loss
+    # itself isn't predictable, so conviction reflects spike magnitude, not P(win).
+    if not model.calibrated:
+        decision, conviction = "NO-TRADE", "LOW"
+        rationale = "Predictor uncalibrated (ingest the full tick history first)."
+    elif not plan.feasible or S < TRADE_MIN:
+        decision, conviction = "NO-TRADE", "LOW"
+        rationale = (f"Predicted opening spike only ~{S:.0f} pts — too small/choppy to clear a "
+                     f">=10pt entry + TP. Historically these days are a coin-flip; sit out.")
+    else:
+        decision = "TRADE"
+        conviction = "STRONG" if S >= BIG_MIN else "MODERATE"
+        big = " — BIG-SPIKE day likely (30+ pt; historically ~95% winners)" if S >= BIG_MIN else ""
+        rationale = (f"Predicted opening spike ~{S:.0f} pts (P(30+)={pred.p_big*100:.0f}%){big}. "
+                     f"Sized to hit ${target_dollars:,.0f}. Note: spike SIZE is predictable; the "
+                     f"win/loss on any single day is not — respect the stop.")
     return MorningTickPlan(
-        date=date, volatility=volatility_level(prior_vix, news_score), prior_vix=prior_vix,
-        news_label=flag.label, predicted_spike=S, calibrated=model.calibrated, plan=plan)
+        date=date, volatility=volatility_level(prior_vix, flag.score), prior_vix=prior_vix,
+        news_label=flag.label, predicted_spike=S, p_big=pred.p_big, calibrated=model.calibrated,
+        decision=decision, conviction=conviction, rationale=rationale, plan=plan)
 
 
 # ----------------------------------------------------------------- report

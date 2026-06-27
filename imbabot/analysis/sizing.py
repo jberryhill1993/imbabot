@@ -97,39 +97,41 @@ def tp_plan_from_spike(
     max_contracts: int = 10,
     counter_poke: float = 4.0,
     slip_margin: float = 3.0,
-    min_spread: float = 5.0,
+    min_spread: float = 10.0,
     sl_points: float = 8.0,
+    min_tp: float = 3.0,
+    max_tp: float = 15.0,
 ) -> SpikePlan:
-    """Given a predicted opening spike and a $ take-profit target, recommend the entry
-    spread (±X) and the number of contracts so the TP is reachable *inside the spike*.
+    """Recommend entry spread (±X) and # contracts to hit a $TP, scaled to the predicted spike.
 
-    Entry ±X sits just above the typical opening counter-poke (so the first jiggle doesn't
-    whipsaw you) but inside the spike; the reachable TP distance is what's left of the spike
-    after entry and slippage; contracts scale to hit the dollar target. Honest: if the
-    predicted spike can't clear entry+TP, it says so rather than inventing a plan.
+    Entry ±X >= ``min_spread`` (10 by default — a tighter entry can trigger pre-open when the
+    brackets are placed at 8:29:59) and above the typical counter-poke, but inside the spike.
+    The reachable TP distance T = the room the spike leaves past entry, clamped to [min_tp, max_tp]:
+    a BIG spike -> standard T, few contracts; a SMALL spike -> tighter T, MORE contracts so the $TP
+    is still reachable; too small to clear entry + min_tp -> NO-TRADE.
     """
-    X = min(predicted_spike, max(min_spread, counter_poke + 1.0))
-    T = predicted_spike - X - slip_margin
-    if T <= 0:
+    X = max(min_spread, counter_poke + 1.0)
+    room = predicted_spike - X - slip_margin           # points the move extends past entry
+    if room < min_tp:
         return SpikePlan(
             feasible=False, predicted_spike=predicted_spike, entry_spread=round(X, 1),
             tp_distance_points=0.0, contracts=0, capped=False, target_dollars=target_dollars,
             achievable_dollars=0.0, tp_bracket_dollars=0.0, sl_points=sl_points,
             sl_bracket_dollars=0.0,
-            note=("Predicted opening spike is too small to clear your entry + a take-profit "
-                  "after slippage — low conviction. Consider sitting out or a smaller TP."))
+            note=("Predicted spike too small to clear a >=10pt entry + take-profit after slippage "
+                  "-> NO-TRADE (low conviction)."))
+    T = max(min_tp, min(max_tp, room))
     want = max(1, math.ceil(target_dollars / (T * dollars_per_point)))
     capped = want > max_contracts
     contracts = min(want, max_contracts)
     achievable = contracts * T * dollars_per_point
     sl_dollars = contracts * sl_points * dollars_per_point
     if capped:
-        note = (f"To hit ${target_dollars:,.0f} you'd need ~{want} contracts; capped at "
-                f"{max_contracts}. At {contracts} a winning open nets ~${achievable:,.0f}.")
+        note = (f"To hit ${target_dollars:,.0f} needs ~{want} contracts; capped at {max_contracts}. "
+                f"At {contracts} a clean open nets ~${achievable:,.0f} (TP {T:.0f}pt).")
     else:
-        note = (f"{contracts} contract(s) at entry +/-{X:.0f}: a clean open hits the take-profit "
-                f"({T:.0f} pts ~ ${achievable:,.0f}); a stop loses ~${sl_dollars:,.0f}. "
-                f"Size scales the outcome, not the odds.")
+        note = (f"{contracts} contract(s), entry +/-{X:.0f}, TP {T:.0f}pt: a clean open hits "
+                f"~${achievable:,.0f}; a stop loses ~${sl_dollars:,.0f}. Size scales outcome, not odds.")
     return SpikePlan(
         feasible=True, predicted_spike=predicted_spike, entry_spread=round(X, 1),
         tp_distance_points=round(T, 1), contracts=contracts, capped=capped,

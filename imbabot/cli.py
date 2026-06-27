@@ -360,28 +360,42 @@ def cmd_recommend(args: argparse.Namespace) -> int:
 
 
 def cmd_analyze_ticks(args: argparse.Namespace) -> int:
-    """Tick-data Morning analysis: ingest tbbo ticks, simulate the straddle, report."""
-    from .analysis.tick_runner import analyze_ticks, analysis_report, morning_plan
-
-    actual = {"2026-06-22": -540, "2026-06-25": -510}   # the user's known trades (sample)
-    try:
-        rows = analyze_ticks(args.source)
-    except Exception as exc:
-        print(f"Tick analysis failed: {exc}")
-        return 1
-    print(analysis_report(rows, actual=actual))
-    if args.target and rows:
-        mp = morning_plan(rows[-1].date, target_dollars=args.target,
-                          max_contracts=args.max_contracts)
+    """Tick-data Morning analysis: ingest, (re)fit the spike predictor, walk-forward, report."""
+    from .analysis.tick_runner import morning_plan
+    if args.source:
+        from .analysis.tick_data import ingest_tbbo_zip
+        try:
+            days = ingest_tbbo_zip(args.source)
+            print(f"Ingested {len(days)} tick day(s).")
+        except Exception as exc:
+            print(f"Ingest failed: {exc}")
+            return 1
+    if args.fit:
+        from .analysis.tick_dataset import build_dataset
+        from .analysis.spike_model import SpikeModel, save_spike_model
+        from .analysis.walkforward import evaluate
+        rows = build_dataset()
+        if not rows:
+            print("No cached tick days. Pass a tbbo zip to ingest first.")
+            return 1
+        save_spike_model(SpikeModel().fit(rows))
+        print(f"Fitted spike predictor on {len(rows)} days; model saved.\n")
+        print(evaluate(rows, warm=60, k=25, spike_min=20).text)
+    if args.target:
+        from datetime import datetime
+        from .analysis.tick_data import cached_dates
+        cd = cached_dates()
+        date = args.date or (cd[-1] if cd else datetime.now().astimezone().date().isoformat())
+        mp = morning_plan(date, target_dollars=args.target, max_contracts=args.max_contracts)
         p = mp.plan
-        print(f"\nMorning Plan demo ({rows[-1].date}, TP ${args.target:,.0f}):")
-        print(f"  Volatility: {mp.volatility}   predicted spike ~{mp.predicted_spike:.0f} pts "
-              f"({'calibrated' if mp.calibrated else 'UNCALIBRATED - needs full history'})")
-        if p.feasible:
-            print(f"  -> entry +/-{p.entry_spread:.0f}, {p.contracts} contract(s), "
-                  f"TP {p.tp_distance_points:.0f}pt = ${p.achievable_dollars:,.0f}, "
-                  f"SL ${p.sl_bracket_dollars:,.0f}")
-        print(f"  {p.note}")
+        sz = (f"{p.contracts} contract(s) +/-{p.entry_spread:.0f}, TP {p.tp_distance_points:.0f}pt "
+              f"= ${p.achievable_dollars:,.0f}, SL ${p.sl_bracket_dollars:,.0f}" if p.feasible else "—")
+        print(f"\nMorning Plan {date} (TP ${args.target:,.0f}):")
+        print(f"  {mp.decision} / {mp.conviction}   ·   Volatility {mp.volatility}   ·   "
+              f"predicted spike ~{mp.predicted_spike:.0f}pt   ·   P(30+)={mp.p_big*100:.0f}%")
+        print(f"  News: {mp.news_label}")
+        print(f"  Size: {sz}")
+        print(f"  {mp.rationale}")
     return 0
 
 
@@ -463,9 +477,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--date", help="ISO date override (default: today)")
     sp.set_defaults(func=cmd_recommend)
 
-    sp = sub.add_parser("analyze-ticks", help="tick-data Morning analysis (tbbo zip/dir)")
+    sp = sub.add_parser("analyze-ticks", help="tick-data Morning analysis + fit/walk-forward")
     sp.add_argument("source", nargs="?", help="Databento tbbo zip to ingest (default: cached ticks)")
-    sp.add_argument("--target", type=float, help="profit target $ for the Morning Plan demo")
+    sp.add_argument("--fit", action="store_true", help="(re)fit the spike predictor + walk-forward")
+    sp.add_argument("--target", type=float, help="profit target $ for the Morning Plan output")
+    sp.add_argument("--date", help="date for the Morning Plan (default: latest cached)")
     sp.add_argument("--max-contracts", type=int, default=10, help="contract cap (default 10)")
     sp.set_defaults(func=cmd_analyze_ticks)
 

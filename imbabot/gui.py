@@ -512,6 +512,20 @@ class ImbabotGUI:
         y = max(0, (sh - h) // 2)
         r.geometry(f"{w}x{h}+{x}+{y}")
 
+    def _grow_to_content(self) -> None:
+        """Grow the window (without moving it) so dynamic content — e.g. the Morning Plan
+        panel after Recalculate — is fully visible without manual resizing. Clamped to the
+        screen; never shrinks below the current size, so it doesn't 'jump'."""
+        try:
+            r = self.root
+            r.update_idletasks()
+            sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+            w = min(max(r.winfo_reqwidth(), r.winfo_width()), sw - 40)
+            h = min(max(r.winfo_reqheight() + 6, r.winfo_height()), sh - 60)
+            r.geometry(f"{w}x{h}")
+        except Exception:
+            pass
+
     def _build_tab_connect(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
         nb.add(tab, text="Connect")
@@ -1175,6 +1189,7 @@ class ImbabotGUI:
             self.btn_mp_calib.configure(state="normal")
             self.lbl_mp_detail.configure(text=evt[1])
             self.log(evt[1])
+            self._grow_to_content()
         elif kind == "morning_error":
             self.btn_mp_recalc.configure(state="normal")
             self.btn_mp_calib.configure(state="normal")
@@ -1199,10 +1214,21 @@ class ImbabotGUI:
     def _morning_calib_worker(self, path: str) -> None:
         try:
             from .analysis.tick_data import ingest_tbbo_zip
+            from .analysis.tick_dataset import build_dataset
+            from .analysis.spike_model import SpikeModel, save_spike_model
+            from .analysis.walkforward import evaluate
             days = ingest_tbbo_zip(path)
-            msg = (f"Ingested {len(days)} tick day(s): {days[0].date}..{days[-1].date}. "
-                   f"Click Recalculate." if days else "No tbbo files found in that zip.")
-            self.events.put(("morning_calib", msg))
+            if not days:
+                self.events.put(("morning_calib", "No tbbo files found in that zip."))
+                return
+            rows = build_dataset()
+            save_spike_model(SpikeModel().fit(rows))
+            v = evaluate(rows, warm=60, k=25, spike_min=20)
+            verdict = "edge CONFIRMED" if v.edge else "no validated edge (context only)"
+            self.events.put(("morning_calib",
+                f"Ingested {len(days)} days, fitted predictor on {len(rows)}. Walk-forward: spike "
+                f"corr {v.spike_corr:+.2f}, TRADE-days net ${v.sel_net:+.0f}/day vs baseline "
+                f"${v.base_net:+.0f} — {verdict}. Click Recalculate."))
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))
 
@@ -1238,11 +1264,11 @@ class ImbabotGUI:
 
     def _show_morning_plan(self, mp) -> None:
         self.btn_mp_recalc.configure(state="normal")
-        vix = f"VIX {mp.prior_vix:.1f}" if mp.prior_vix else "VIX n/a"
-        cal = "" if mp.calibrated else "   ·   UNCALIBRATED (needs full tick history)"
+        tag = "✅ TRADE" if mp.decision == "TRADE" else "⛔ NO-TRADE"
+        cal = "" if mp.calibrated else "   ·   UNCALIBRATED (Ingest tick data first)"
         self.lbl_mp_action.configure(
-            text=f"Volatility: {mp.volatility}   ·   {vix}   ·   "
-                 f"predicted open spike ~{mp.predicted_spike:.0f}pt{cal}")
+            text=f"{tag}  ·  {mp.conviction}  ·  Vol {mp.volatility}  ·  "
+                 f"predicted spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{cal}")
         p = mp.plan
         if p.feasible:
             self.lbl_mp_sizing.configure(
@@ -1251,10 +1277,13 @@ class ImbabotGUI:
                      f"(${p.achievable_dollars:,.0f}) / SL ${p.sl_bracket_dollars:,.0f}"
                      f"{'  (capped at max_contracts)' if p.capped else ''}")
         else:
-            self.lbl_mp_sizing.configure(text="")
-        self.lbl_mp_detail.configure(text=f"{mp.date}  ·  {mp.news_label}  ·  {p.note}")
-        self.log(f"Morning Plan {mp.date}: {mp.volatility} vol, spike ~{mp.predicted_spike:.0f}pt "
-                 f"-> {p.contracts}ct +/-{p.entry_spread:.0f}")
+            self.lbl_mp_sizing.configure(text="(no size — NO-TRADE)")
+        vix = f"VIX {mp.prior_vix:.1f}" if mp.prior_vix else "VIX n/a"
+        self.lbl_mp_detail.configure(
+            text=f"{mp.date}  ·  {vix}  ·  News: {mp.news_label}\n{mp.rationale}")
+        self.log(f"Morning Plan {mp.date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
+                 f"-> {p.contracts if p.feasible else 0}ct")
+        self._grow_to_content()
 
     def _append_log(self, line: str, level: str = "info") -> None:
         self.txt.configure(state="normal")
