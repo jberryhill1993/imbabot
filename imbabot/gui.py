@@ -637,27 +637,28 @@ class ImbabotGUI:
                             "skipped — disarm on holidays.",
                   style="Hint.TLabel", wraplength=860).grid(row=12, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
-        # --- Morning Plan (advisory: recommended spread / stop / sizing) ---
+        # --- Morning Plan (tick-data: volatility + TP-driven sizing/spread; advisory) ---
         ttk.Separator(tab).grid(row=13, column=0, columnspan=5, sticky="ew", pady=(16, 6))
-        ttk.Label(tab, text="Morning Plan — advisory (the bot never changes your settings)",
+        ttk.Label(tab, text="Morning Plan — tick-data (advisory; the bot never changes your settings)",
                   style="Hs.TLabel").grid(row=14, column=0, columnspan=5, sticky="w")
         self.lbl_mp_action = ttk.Label(tab, text="— not yet calculated —", style="Hs.TLabel")
         self.lbl_mp_action.grid(row=15, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.btn_mp_recalc = ttk.Button(tab, text="↻ Recalculate now",
                                         command=self._on_morning_recalc, style="Accent.TButton")
         self.btn_mp_recalc.grid(row=15, column=2, sticky="w", padx=6, pady=(6, 0))
-        self.btn_mp_calib = ttk.Button(tab, text="Run 12-month calibration",
+        self.btn_mp_calib = ttk.Button(tab, text="Ingest tick data…",
                                        command=self._on_morning_calibrate, style="Ghost.TButton")
         self.btn_mp_calib.grid(row=15, column=3, sticky="w", pady=(6, 0))
         self.lbl_mp_detail = ttk.Label(
-            tab, text="Ingest history + calibrate once, then Recalculate 10–30 min before the open.",
+            tab, text="Enter a profit-target $, then Recalculate for the volatility level + suggested "
+                      "contracts/spread. (Predictor is uncalibrated until a full tick history is ingested.)",
             style="Sm.TLabel", wraplength=860)
         self.lbl_mp_detail.grid(row=16, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(tab, text="Profit target $", style="Sm.TLabel").grid(row=17, column=0, sticky="w", pady=(8, 0))
-        self.var_mp_target = tk.StringVar(value="")
+        self.var_mp_target = tk.StringVar(value="800")
         ttk.Entry(tab, textvariable=self.var_mp_target, width=10, font=(FONT, 11)).grid(
             row=17, column=1, sticky="w", padx=6, pady=(8, 0))
-        ttk.Label(tab, text="(optional — fills in suggested contracts + $ brackets on Recalculate)",
+        ttk.Label(tab, text="(drives suggested contracts + entry spread on Recalculate)",
                   style="Hint.TLabel").grid(row=17, column=2, columnspan=3, sticky="w", pady=(8, 0))
         self.lbl_mp_sizing = ttk.Label(tab, text="", style="Sm.TLabel", wraplength=860)
         self.lbl_mp_sizing.grid(row=18, column=0, columnspan=5, sticky="w", pady=(4, 0))
@@ -1185,26 +1186,23 @@ class ImbabotGUI:
 
     # ---------------------------------------------------- Morning Plan (advisory)
     def _on_morning_calibrate(self) -> None:
+        """Ingest a Databento tbbo tick zip (replaces the old 12-month calibration)."""
+        path = filedialog.askopenfilename(
+            title="Select Databento tbbo tick zip",
+            filetypes=[("Zip", "*.zip"), ("All files", "*.*")])
+        if not path:
+            return
         self.btn_mp_calib.configure(state="disabled")
-        self.lbl_mp_detail.configure(text="Calibrating… backtesting cached history (this can take a moment).")
-        threading.Thread(target=self._morning_calib_worker, daemon=True).start()
+        self.lbl_mp_detail.configure(text="Ingesting tick data…")
+        threading.Thread(target=self._morning_calib_worker, args=(path,), daemon=True).start()
 
-    def _morning_calib_worker(self) -> None:
+    def _morning_calib_worker(self, path: str) -> None:
         try:
-            from .analysis.runner import calibrate_morning
-            import re
-            raw = (self.var_symbol.get().strip() or self.settings.contract_symbol).upper()
-            # Strip contract month+year suffix so "NQU26" → "NQ", "MNQH26" → "MNQ".
-            # History is ingested under the parent symbol, not the specific front month.
-            symbol = re.sub(r'[FGHJKMNQUVXZ]\d{2}$', '', raw) or raw
-            res = calibrate_morning(
-                symbol,
-                tp_points=self.settings.analysis_tp_points,
-                slippage_points=self.settings.analysis_slippage_points,
-                commission_points=self.settings.analysis_commission_points,
-                spike_window_seconds=self.settings.analysis_spike_window_seconds,
-            )
-            self.events.put(("morning_calib", res.summary))
+            from .analysis.tick_data import ingest_tbbo_zip
+            days = ingest_tbbo_zip(path)
+            msg = (f"Ingested {len(days)} tick day(s): {days[0].date}..{days[-1].date}. "
+                   f"Click Recalculate." if days else "No tbbo files found in that zip.")
+            self.events.put(("morning_calib", msg))
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))
 
@@ -1215,64 +1213,48 @@ class ImbabotGUI:
 
     def _morning_recalc_worker(self) -> None:
         try:
-            from .analysis.runner import run_morning
-            symbol = self.var_symbol.get().strip() or self.settings.contract_symbol
-            onr = price = None
-            dpp = 20.0
-            if self.engine:
-                try:
-                    rng = self.engine.overnight_range()
-                    onr = (rng["high"] - rng["low"]) if rng else None
-                except Exception:
-                    onr = None
-                try:
-                    price = self.engine.last_price()
-                except Exception:
-                    price = None
-                c = getattr(self.engine, "contract", None)
-                if c and c.tick_size:
-                    dpp = c.tick_value / c.tick_size
-            try:
-                cur = float(self.var_points.get())
-            except (ValueError, AttributeError):
-                cur = None
-            target = None
+            from datetime import datetime
+            from .analysis.tick_runner import morning_plan
+            from .analysis.tick_data import cached_dates
+            target = 800.0
             t = self.var_mp_target.get().strip()
             if t:
                 try:
                     target = float(t.replace("$", "").replace(",", ""))
                 except ValueError:
-                    target = None
-            res = run_morning(symbol, overnight_range=onr, current_price=price,
-                              current_spread=cur, target_dollars=target, dollars_per_point=dpp)
-            self.events.put(("morning_plan", res))
+                    pass
+            dpp = 20.0
+            if self.engine:
+                c = getattr(self.engine, "contract", None)
+                if c and c.tick_size:
+                    dpp = c.tick_value / c.tick_size
+            cd = cached_dates()
+            date = cd[-1] if cd else datetime.now().astimezone().date().isoformat()
+            mp = morning_plan(date, target_dollars=target, dollars_per_point=dpp,
+                              max_contracts=self.settings.max_contracts)
+            self.events.put(("morning_plan", mp))
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))
 
-    def _show_morning_plan(self, res) -> None:
+    def _show_morning_plan(self, mp) -> None:
         self.btn_mp_recalc.configure(state="normal")
-        p = res.plan
-        tag = "TRADE" if p.action == "TRADE" else "⚠ SKIP TODAY"
-        spike = ""
-        if getattr(p, "expected_spike_points", 0):
-            spike = (f"   ·   open spike ~{p.expected_spike_points:.0f}pt ({p.spike_label.upper()})"
-                     f" → $TP in candle {p.spike_verdict.upper()} "
-                     f"(need ~{p.spike_needed_points:.0f}pt)")
+        vix = f"VIX {mp.prior_vix:.1f}" if mp.prior_vix else "VIX n/a"
+        cal = "" if mp.calibrated else "   ·   UNCALIBRATED (needs full tick history)"
         self.lbl_mp_action.configure(
-            text=f"{tag}   ·   spread ±{p.spread:.0f}   stop {p.stop_points:.0f}   "
-                 f"conviction {p.conviction.upper()}   whipsaw {p.whipsaw_risk.upper()}{spike}")
-        self.lbl_mp_detail.configure(text=p.rationale)
-        if res.sizing:
-            sz = res.sizing
+            text=f"Volatility: {mp.volatility}   ·   {vix}   ·   "
+                 f"predicted open spike ~{mp.predicted_spike:.0f}pt{cal}")
+        p = mp.plan
+        if p.feasible:
             self.lbl_mp_sizing.configure(
-                text=f"Target ${sz.target_dollars:,.0f} → {sz.contracts} contract(s)"
-                     f"{' (capped)' if sz.capped else ''}  ·  set TopStep TP ${sz.tp_bracket_dollars:,.0f} "
-                     f"/ SL ${sz.sl_bracket_dollars:,.0f}  ·  win ~${sz.gross_win_dollars:,.0f} / "
-                     f"loss ~${sz.downside_dollars:,.0f}")
+                text=f"TP ${p.target_dollars:,.0f}  ->  {p.contracts} contract(s) at entry "
+                     f"+/-{p.entry_spread:.0f}   ·   TP {p.tp_distance_points:.0f}pt "
+                     f"(${p.achievable_dollars:,.0f}) / SL ${p.sl_bracket_dollars:,.0f}"
+                     f"{'  (capped at max_contracts)' if p.capped else ''}")
         else:
             self.lbl_mp_sizing.configure(text="")
-        self.log(f"Morning Plan: {p.action} ±{p.spread:.0f}/stop {p.stop_points:.0f} "
-                 f"({p.conviction} conviction)")
+        self.lbl_mp_detail.configure(text=f"{mp.date}  ·  {mp.news_label}  ·  {p.note}")
+        self.log(f"Morning Plan {mp.date}: {mp.volatility} vol, spike ~{mp.predicted_spike:.0f}pt "
+                 f"-> {p.contracts}ct +/-{p.entry_spread:.0f}")
 
     def _append_log(self, line: str, level: str = "info") -> None:
         self.txt.configure(state="normal")

@@ -74,19 +74,3 @@ def row_from_record(
 
 def to_vector(row: Dict[str, float]) -> List[float]:
     return [row[name] for name in FEATURE_NAMES]
-
-
-def opening_impulse(rec: DayRecord, window_seconds: int = 3) -> Optional[float]:
-    """Max swing from the 09:30:00 open within the first ``window_seconds`` (points).
-
-    For 1-second data ``OpenBar.minute`` holds the seconds offset, so this measures how
-    far price spiked above OR below the open print in the opening seconds — a direct read
-    of the opening volatility. Returns ``None`` if no opening bars are present. Advisory
-    only: this never touches live order placement.
-    """
-    bars = [b for b in rec.open_bars if b.minute < window_seconds]
-    if not bars:
-        return None
-    up = max(b.h for b in bars) - rec.ref_price
-    down = rec.ref_price - min(b.l for b in bars)
-    return max(up, down)

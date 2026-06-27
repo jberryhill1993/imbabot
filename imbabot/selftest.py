@@ -359,7 +359,6 @@ def run_selftest() -> int:
     from .analysis.backtest import (simulate_day, backtest_2d, BracketSpec,
                                     spread_grid, stop_grid)
     from .analysis.sizing import size_for_target, point_value
-    from .analysis.morning import MorningModel
     from .analysis.databento_csv import parse_databento_csv, build_day_records_1s
     from datetime import timezone, timedelta
 
@@ -422,67 +421,6 @@ def run_selftest() -> int:
     _check("sizing: caps at max_contracts",
            size_for_target(5000, tp_points=13.3, stop_points=9, dollars_per_point=dpp,
                            winrate=0.6, max_contracts=10).capped)
-
-    # 10e) morning k-NN policy discriminates TRADE vs SKIP
-    from .analysis.backtest import Backtest2D
-
-    def _row(v, a, pre=0, f=0):
-        return {"prior_vix": v, "vix_change": 0.0, "overnight_range": 0.0, "gap_abs": 0.0,
-                "atr14": a, "preopen_score": pre, "fomc": f}
-    cells = [(14, 10), (18, 8)]
-    dts, frows, pnl, whip = [], [], {}, {}
-    for i in range(35):  # calm low-VIX winners (>k so neighbors are query-specific)
-        d = f"w{i}"; dts.append(d); frows.append(_row(13 + i * 0.05, 600))
-        pnl[d] = [13.3, 5.0]; whip[d] = [0, 0]
-    for i in range(35):  # stormy high-VIX FOMC losers: negative everywhere
-        d = f"l{i}"; dts.append(d); frows.append(_row(28 + i * 0.05, 1200, 2, 1))
-        pnl[d] = [-8.3, -8.3]; whip[d] = [1, 1]
-    bt2 = Backtest2D(spreads=[14, 18], stops=[10, 8], target_points=13.3,
-                     cells_order=cells, per_day_cell_pnl=pnl, per_day_cell_whip=whip)
-    mm = MorningModel().fit(frows, dts, bt2)
-    _check("morning policy: calm low-VIX -> TRADE",
-           mm.recommend(_row(13, 600)).action == "TRADE")
-    _check("morning policy: stormy high-VIX FOMC -> SKIP",
-           mm.recommend(_row(29, 1250, 2, 1)).action == "SKIP")
-
-    # 10f) opening-impulse measurement (advisory signal, NOT execution)
-    from .analysis.features import opening_impulse
-    spk = DayRecord(date="s", ref_price=21000, open_bars=[
-        OpenBar(0, 21000, 21009, 20996, 21008, 1),    # 1st second: +9 up, -4 down -> impulse 9
-        OpenBar(1, 21008, 21012, 21007, 21011, 1),
-        OpenBar(2, 21011, 21013, 21002, 21004, 1)])   # by 3s: high 21013 -> +13 swing
-    _check("opening_impulse = max swing from open in window",
-           opening_impulse(spk, 1) == 9.0, f"got {opening_impulse(spk, 1)}")
-    _check("opening_impulse widens with window",
-           opening_impulse(spk, 3) >= opening_impulse(spk, 1))
-    _check("opening_impulse None with no bars",
-           opening_impulse(DayRecord(date="z", ref_price=1, open_bars=[]), 3) is None)
-
-    # 10g) expected opening spike predicted from similar mornings (calm vs violent)
-    imp = [3.0] * 35 + [22.0] * 35   # calm low-VIX days spike ~3, stormy ~22
-    mm2 = MorningModel().fit(frows, dts, bt2, impulses=imp)
-    calm_plan = mm2.recommend(_row(13, 600))
-    wild_plan = mm2.recommend(_row(29, 1250, 2, 1))
-    _check("expected spike: calm morning small", calm_plan.expected_spike_points < 8,
-           f"got {calm_plan.expected_spike_points}")
-    _check("expected spike: violent morning large + labeled", wild_plan.expected_spike_points > 16
-           and wild_plan.spike_label == "violent", f"got {wild_plan.expected_spike_points}/{wild_plan.spike_label}")
-
-    # 10h) go/no-go: spike vs entry(±X)+TP (TP=13.3 from bt2). Violent ~22pt, calm ~3pt.
-    wild_tight = mm2.recommend(_row(29, 1250, 2, 1), user_entry=3)   # need 3+13.3=16.3, +5 margin=21.3
-    wild_wide = mm2.recommend(_row(29, 1250, 2, 1), user_entry=20)   # need 20+13.3=33.3 >> 22
-    calm_tight = mm2.recommend(_row(13, 600), user_entry=3)          # spike ~3 << 16.3
-    _check("go/no-go: violent open + tight entry -> likely",
-           wild_tight.spike_verdict == "likely", f"got {wild_tight.spike_verdict}")
-    _check("go/no-go: violent open + wide entry -> unlikely",
-           wild_wide.spike_verdict == "unlikely", f"got {wild_wide.spike_verdict}")
-    _check("go/no-go: calm open -> unlikely",
-           calm_tight.spike_verdict == "unlikely", f"got {calm_tight.spike_verdict}")
-    _check("go/no-go: needed = entry + TP", abs(wild_tight.spike_needed_points - (3 + 13.3)) < 0.01,
-           f"got {wild_tight.spike_needed_points}")
-    _check("go/no-go: max-fit entry = spike - TP", wild_tight.max_entry_for_spike > 0
-           and abs(wild_tight.max_entry_for_spike - (wild_tight.expected_spike_points - 13.3)) < 0.01,
-           f"got {wild_tight.max_entry_for_spike}")
 
     # 11) TICK engine: the core fix is resolving TP vs SL in true time order.
     from .analysis.tick_data import TickDay, Tick
