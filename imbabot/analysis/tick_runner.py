@@ -69,7 +69,10 @@ def analyze_ticks(source: Optional[str | Path] = None, **kw) -> List[TickDayAnal
 # ----------------------------------------------------------------- Morning Plan
 # Validated thresholds (full-year walk-forward): predicted spike >= TRADE_MIN beats the
 # trade-all baseline OOS; >= BIG_MIN flags the high-conviction 30+ pt "money days".
-TRADE_MIN = 18.0
+# TRADE_MIN matches walkforward.evaluate's spike_min (20): the 258-day leave-one-out sweep
+# showed 18 -> 20 lifts win-rate 49%->56% and $/day $61->$94 while filtering whipsaw days
+# (e.g. 4/13, predicted 19.6) that sat just over the old line.
+TRADE_MIN = 20.0
 BIG_MIN = 28.0
 
 

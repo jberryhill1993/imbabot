@@ -536,11 +536,16 @@ def run_selftest() -> int:
            nf.date() == _date(2026, 1, 20), f"got {nf.date()}")
 
     # 12c) morning_plan resolves a closed day to the next session
-    from .analysis.tick_runner import morning_plan
+    from .analysis.tick_runner import morning_plan, TRADE_MIN
     mp = morning_plan("2026-06-27", target_dollars=800.0)   # a Saturday
     _check("morning plan: closed day -> next session + flag",
            mp.session_date == "2026-06-29" and mp.market_closed_today,
            f"got {mp.session_date}/{mp.market_closed_today}")
+
+    # 12d) TRADE line set to the walk-forward-validated 20-pt cutoff (was 18; 18->20 lifts
+    # win-rate 49%->56% and filters whipsaw days that sat just over the old line, e.g. 4/13).
+    _check("morning trade line == 20 (matches walkforward spike_min)",
+           TRADE_MIN == 20.0, f"got {TRADE_MIN}")
 
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
