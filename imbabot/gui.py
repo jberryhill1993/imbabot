@@ -238,7 +238,8 @@ class ImbabotGUI:
 
         root.title(f"Imbabot {__version__}")
         root.configure(bg=BG)
-        root.minsize(980, 600)
+        root.resizable(True, True)
+        root.minsize(980, 560)
         root.update_idletasks()
         # Initial size; _fit_window() (after widgets build) snaps it to the content
         # so everything shows without maximizing.
@@ -453,8 +454,9 @@ class ImbabotGUI:
         self.btn_flatten.pack(side="right", padx=(0, 10))
 
         # ===== settings notebook =====
+        self._scroll_canvases = []      # (canvas, inner) for the scrollable tabs
         nb = ttk.Notebook(root)
-        nb.pack(fill="x", padx=20, pady=(16, 8))
+        nb.pack(fill="both", expand=True, padx=20, pady=(16, 8))
         self._build_tab_connect(nb)
         self._build_tab_strategy(nb)
         self._build_tab_test(nb)
@@ -526,6 +528,41 @@ class ImbabotGUI:
         except Exception:
             pass
 
+    def _scrollable_tab(self, nb, title: str, padding: int = 18):
+        """Add a notebook tab whose body scrolls vertically, and return the inner frame to
+        build into. Lets tall content (e.g. the Morning Plan) stay reachable on small screens
+        where the window is clamped to the display — caller code grids into the returned frame
+        exactly as before."""
+        outer = ttk.Frame(nb, style="Surface.TFrame")
+        nb.add(outer, text=title)
+        canvas = tk.Canvas(outer, bg=SURFACE, highlightthickness=0, borderwidth=0)
+        vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview,
+                            style="Vertical.TScrollbar")
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        inner = ttk.Frame(canvas, style="Surface.TFrame", padding=padding)
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner(_e=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Request just enough height to show the content on a big screen; the window's
+            # screen-clamp then forces the canvas to scroll on a small one.
+            sh = canvas.winfo_screenheight()
+            canvas.configure(height=min(inner.winfo_reqheight(), sh - 220))
+
+        def _on_canvas(e):
+            canvas.itemconfigure(win, width=e.width)  # inner matches width -> no h-scroll, labels wrap
+
+        inner.bind("<Configure>", _on_inner)
+        canvas.bind("<Configure>", _on_canvas)
+        # Mouse-wheel scrolls only while the pointer is over this tab.
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all(
+            "<MouseWheel>", lambda ev: canvas.yview_scroll(int(-ev.delta / 120), "units")))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        self._scroll_canvases.append((canvas, inner))
+        return inner
+
     def _build_tab_connect(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
         nb.add(tab, text="Connect")
@@ -570,8 +607,7 @@ class ImbabotGUI:
         self.lbl_conn.grid(row=8, column=2, columnspan=2, sticky="w", padx=10)
 
     def _build_tab_strategy(self, nb) -> None:
-        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
-        nb.add(tab, text="Strategy")
+        tab = self._scrollable_tab(nb, "Strategy")
 
         ttk.Label(tab, text="Account", style="Sm.TLabel").grid(row=0, column=0, sticky="w", pady=5)
         self.cmb_account = ttk.Combobox(tab, state="readonly", width=30, values=[], font=(FONT, 11))
@@ -678,8 +714,7 @@ class ImbabotGUI:
         self.lbl_mp_detail.grid(row=19, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     def _build_tab_test(self, nb) -> None:
-        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
-        nb.add(tab, text="Test")
+        tab = self._scrollable_tab(nb, "Test")
         ttk.Label(tab, text="Verify it actually places orders", style="Hs.TLabel").grid(
             row=0, column=0, columnspan=3, sticky="w")
         self.var_test_mode = tk.BooleanVar(value=self.settings.test_mode)
@@ -1255,6 +1290,14 @@ class ImbabotGUI:
         self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
                  f"-> {p.contracts if (mp.decision=='TRADE' and p.feasible) else 0}ct")
         self._grow_to_content()
+        # Make sure the plan is in view even when the window is clamped on a small screen:
+        # scroll the Strategy tab (first scrollable tab) to reveal the bottom panel.
+        try:
+            canvas = self._scroll_canvases[0][0]
+            canvas.update_idletasks()
+            canvas.yview_moveto(1.0)
+        except Exception:
+            pass
 
     def _append_log(self, line: str, level: str = "info") -> None:
         self.txt.configure(state="normal")
