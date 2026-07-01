@@ -84,6 +84,8 @@ class SpikePlan:
     target_dollars: float
     achievable_dollars: float    # $ at the (possibly capped) contracts
     recommended_tp_dollars: float  # realistic max $TP at the contract cap on this predicted spike
+    recommended_contracts: int   # the recommended play = trade the full cap
+    recommended_sl_dollars: float  # $ stop-loss at the recommended (cap) contracts -> set in TopStep
     contracts_wanted: int        # contracts the entered target WOULD need (pre-cap) -> drives the alert
     max_contracts: int           # the cap in force (e.g. 5 on TopStep)
     tp_bracket_dollars: float
@@ -119,20 +121,24 @@ def tp_plan_from_spike(
         return SpikePlan(
             feasible=False, predicted_spike=predicted_spike, entry_spread=round(X, 1),
             tp_distance_points=0.0, contracts=0, capped=False, target_dollars=target_dollars,
-            achievable_dollars=0.0, recommended_tp_dollars=0.0, contracts_wanted=0,
+            achievable_dollars=0.0, recommended_tp_dollars=0.0, recommended_contracts=0,
+            recommended_sl_dollars=0.0, contracts_wanted=0,
             max_contracts=max_contracts, tp_bracket_dollars=0.0, sl_points=sl_points,
             sl_bracket_dollars=0.0,
             note=("Predicted spike too small to clear a >=10pt entry + take-profit after slippage "
                   "-> NO-TRADE (low conviction)."))
     T = max(min_tp, min(max_tp, room))
-    want = max(1, math.ceil(target_dollars / (T * dollars_per_point)))
+    # Tolerant ceil: a target that lands exactly on a contract boundary (e.g. the recommended TP)
+    # must not tip up a contract via floating-point dust (9.8999.. instead of 9.9).
+    want = max(1, math.ceil(target_dollars / (T * dollars_per_point) - 1e-6))
     capped = want > max_contracts
     contracts = min(want, max_contracts)
     achievable = contracts * T * dollars_per_point
     sl_dollars = contracts * sl_points * dollars_per_point
-    # Realistic max $TP at the contract cap on this predicted spike (TP reachable inside the
-    # first-second thrust) — what to actually aim for on a >=5-cap prop account.
-    recommended = max_contracts * T * dollars_per_point
+    # Recommended play = trade the full cap. The recommended $TP is the max reachable at the cap,
+    # floored to a clean $5 so it is <= the true 5-ct value -> typing it back never trips the cap.
+    recommended = math.floor(max_contracts * T * dollars_per_point / 5.0) * 5
+    recommended_sl = max_contracts * sl_points * dollars_per_point
     if capped:
         note = (f"To hit ${target_dollars:,.0f} needs ~{want} contracts; capped at {max_contracts}. "
                 f"At {contracts} a clean open nets ~${achievable:,.0f} (TP {T:.0f}pt).")
@@ -143,6 +149,7 @@ def tp_plan_from_spike(
         feasible=True, predicted_spike=predicted_spike, entry_spread=round(X, 1),
         tp_distance_points=round(T, 1), contracts=contracts, capped=capped,
         target_dollars=target_dollars, achievable_dollars=round(achievable, 0),
-        recommended_tp_dollars=round(recommended, 0), contracts_wanted=want,
+        recommended_tp_dollars=float(recommended), recommended_contracts=max_contracts,
+        recommended_sl_dollars=round(recommended_sl, 0), contracts_wanted=want,
         max_contracts=max_contracts, tp_bracket_dollars=round(achievable, 0), sl_points=sl_points,
         sl_bracket_dollars=round(sl_dollars, 0), note=note)

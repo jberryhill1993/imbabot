@@ -489,15 +489,21 @@ def run_selftest() -> int:
     notrade = tp_plan_from_spike(12.0, 800.0, min_spread=10.0)    # too small -> NO-TRADE
     _check("sizing: too-small spike -> NO-TRADE", not notrade.feasible)
 
-    # 11g2) 5-contract cap alert + recommended TP $
+    # 11g2) 5-contract cap alert + recommended TP $/SL $ (must be self-consistent)
     capd = tp_plan_from_spike(24.0, 2000.0, min_spread=10.0)      # $2k target exceeds the 5ct cap
     _check("sizing: contracts capped at 5", capd.contracts <= 5 and capd.max_contracts == 5,
            f"got {capd.contracts}/{capd.max_contracts}")
     _check("sizing: cap alert fires (wanted > cap)", capd.capped and capd.contracts_wanted > 5,
            f"capped={capd.capped} wanted={capd.contracts_wanted}")
-    _check("sizing: recommended TP = cap * T * $20",
-           capd.recommended_tp_dollars == 5 * capd.tp_distance_points * 20.0,
-           f"got {capd.recommended_tp_dollars}")
+    _check("sizing: recommended SL = 5 * 8pt * $20", capd.recommended_sl_dollars == 5 * 8.0 * 20.0,
+           f"got {capd.recommended_sl_dollars}")
+    _check("sizing: recommended TP <= true 5ct value", capd.recommended_tp_dollars <= 5 * capd.tp_distance_points * 20.0,
+           f"got {capd.recommended_tp_dollars} vs {5*capd.tp_distance_points*20}")
+    # The whole point: typing the recommended TP back in sizes to exactly 5 ct, NOT capped.
+    reenter = tp_plan_from_spike(24.0, capd.recommended_tp_dollars, min_spread=10.0)
+    _check("sizing: re-entering recommended TP -> exactly 5ct, no warning",
+           reenter.contracts == 5 and not reenter.capped,
+           f"contracts={reenter.contracts} capped={reenter.capped} rec={capd.recommended_tp_dollars}")
 
     # 11h) news calendar impact levels
     from .analysis import calendar as econ

@@ -700,7 +700,7 @@ class ImbabotGUI:
         self.var_mp_target = tk.StringVar(value="800")
         ttk.Entry(tab, textvariable=self.var_mp_target, width=10, font=(FONT, 11)).grid(
             row=16, column=1, sticky="w", padx=6, pady=(8, 0))
-        ttk.Label(tab, text="(drives the contracts + entry spread below on Recalculate)",
+        ttk.Label(tab, text="(optional — for a SMALLER trade than the 5-contract max shown below)",
                   style="Hint.TLabel").grid(row=16, column=2, columnspan=3, sticky="w", pady=(8, 0))
         # The one line that tells the user exactly what to type into Entry Points + Contracts.
         self.lbl_mp_inputs = ttk.Label(tab, text="", style="Hs.TLabel", foreground=GREEN_H)
@@ -1243,6 +1243,13 @@ class ImbabotGUI:
         try:
             from datetime import datetime
             from .analysis.tick_runner import morning_plan
+            # Pull fresh daily VIX so the model's prior-close feature isn't stale (it drives the
+            # spike prediction). Best-effort: refresh() falls back to the cache on any failure.
+            try:
+                from .analysis.market_history import refresh, VIX_SYMBOL
+                refresh(VIX_SYMBOL)
+            except Exception:
+                pass
             target = 800.0
             t = self.var_mp_target.get().strip()
             if t:
@@ -1263,6 +1270,23 @@ class ImbabotGUI:
         except Exception as exc:
             self.events.put(("morning_error", str(exc)))
 
+    def _vix_is_stale(self, session_date: str) -> bool:
+        """True if the cached VIX daily close is older than the session's prior trading day
+        (i.e. the refresh failed and we're showing a stale prior-close feature)."""
+        try:
+            from datetime import date as _d, timedelta
+            from .analysis.market_history import load_daily, VIX_SYMBOL, by_date, prior_value
+            from .market_calendar import is_trading_day
+            pv = prior_value(by_date(load_daily(VIX_SYMBOL)), session_date)
+            if not pv:
+                return True
+            d = _d.fromisoformat(session_date) - timedelta(days=1)
+            while not is_trading_day(d):
+                d -= timedelta(days=1)
+            return pv.date < d.isoformat()
+        except Exception:
+            return False
+
     def _show_morning_plan(self, mp) -> None:
         from datetime import date as _date
         self.btn_mp_recalc.configure(state="normal")
@@ -1277,23 +1301,27 @@ class ImbabotGUI:
             text=f"{tag}  ·  {mp.conviction}  ·  Session: {sess}  ·  Vol {mp.volatility}  ·  "
                  f"spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{banner}{cal}")
         p = mp.plan
-        # Prominent, unambiguous: exactly what to type into the Entry Points + Contracts boxes.
+        # Headline = the 5-contract MAX recommendation, as a plain "type this into TopStep" block.
         if mp.decision == "TRADE" and p.feasible:
             self.lbl_mp_inputs.configure(
-                text=f"➡  ENTER IN BOT    Entry Points:  {p.entry_spread:.0f}      "
-                     f"Contracts:  {p.contracts}{'  (capped)' if p.capped else ''}",
+                text=(f"➡  ENTER IN TOPSTEP     Contracts:  {p.recommended_contracts}      "
+                      f"Entry:  ±{p.entry_spread:.0f} pts      "
+                      f"Take-Profit:  ${p.recommended_tp_dollars:,.0f}      "
+                      f"Stop-Loss:  ${p.recommended_sl_dollars:,.0f}"),
                 foreground=GREEN_H)
-            self.lbl_mp_sizing.configure(
-                text=f"Recommended TP:  ${p.recommended_tp_dollars:,.0f}  "
-                     f"({p.max_contracts}ct max · {p.tp_distance_points:.0f}pt, reachable in the 1st-second spike)"
-                     f"     ·     your target ${p.target_dollars:,.0f} → {p.contracts}ct, "
-                     f"hits ~${p.achievable_dollars:,.0f}; stop ~${p.sl_bracket_dollars:,.0f}.")
-            # Alert only when the entered target can't be reached inside the contract cap.
+            sizing = (f"That's the max at {p.recommended_contracts} contracts — TP {p.tp_distance_points:.0f}pt, "
+                      f"reachable inside the ~1-second opening spike.")
+            # If the user's optional target is BELOW the max, show the smaller alternative.
+            if not p.capped and p.contracts < p.recommended_contracts and p.target_dollars < p.recommended_tp_dollars:
+                sizing += (f"     ·     smaller: your ${p.target_dollars:,.0f} → {p.contracts}ct, "
+                           f"TP ${p.achievable_dollars:,.0f} / SL ${p.sl_bracket_dollars:,.0f}.")
+            self.lbl_mp_sizing.configure(text=sizing)
+            # Alert only when the entered target EXCEEDS what 5 contracts can reach.
             if p.capped:
                 self.lbl_mp_alert.configure(
                     text=f"⚠  Your ${p.target_dollars:,.0f} target needs ~{p.contracts_wanted} contracts — "
-                         f"capped at {p.max_contracts}. Aim for ~${p.recommended_tp_dollars:,.0f} "
-                         f"(or accept the smaller ${p.achievable_dollars:,.0f} fill).")
+                         f"capped at {p.max_contracts}. The max at {p.max_contracts} contracts today is "
+                         f"${p.recommended_tp_dollars:,.0f} — use that.")
                 self.lbl_mp_alert.grid()
             else:
                 self.lbl_mp_alert.grid_remove()
@@ -1301,7 +1329,12 @@ class ImbabotGUI:
             self.lbl_mp_inputs.configure(text="➡  NO-TRADE — sit out today", foreground=RED_H)
             self.lbl_mp_sizing.configure(text="")
             self.lbl_mp_alert.grid_remove()
-        vix = f"VIX {mp.prior_vix:.1f}" if mp.prior_vix else "VIX n/a"
+        # VIX shown is the PRIOR SESSION CLOSE (the model feature) — flag if the daily cache is stale.
+        if mp.prior_vix:
+            stale = "  ⚠ stale" if self._vix_is_stale(mp.session_date) else ""
+            vix = f"VIX {mp.prior_vix:.1f} (prior close){stale}"
+        else:
+            vix = "VIX n/a"
         self.lbl_mp_detail.configure(
             text=f"{vix}  ·  News: {mp.news_label}\n{mp.rationale}")
         self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
