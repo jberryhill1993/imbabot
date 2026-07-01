@@ -705,13 +705,18 @@ class ImbabotGUI:
         # The one line that tells the user exactly what to type into Entry Points + Contracts.
         self.lbl_mp_inputs = ttk.Label(tab, text="", style="Hs.TLabel", foreground=GREEN_H)
         self.lbl_mp_inputs.grid(row=17, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        # Amber cap alert — shown only when the entered $TP would need > the contract cap (5).
+        self.lbl_mp_alert = ttk.Label(tab, text="", style="Hs.TLabel", foreground="#e8a13a",
+                                      wraplength=860)
+        self.lbl_mp_alert.grid(row=18, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.lbl_mp_alert.grid_remove()
         self.lbl_mp_sizing = ttk.Label(tab, text="", style="Sm.TLabel", wraplength=860)
-        self.lbl_mp_sizing.grid(row=18, column=0, columnspan=5, sticky="w", pady=(2, 0))
+        self.lbl_mp_sizing.grid(row=19, column=0, columnspan=5, sticky="w", pady=(2, 0))
         self.lbl_mp_detail = ttk.Label(
             tab, text="Enter a profit-target $, then Recalculate for the volatility, predicted spike, "
                       "TRADE/NO-TRADE, and the contracts + entry spread to use.",
             style="Sm.TLabel", wraplength=860)
-        self.lbl_mp_detail.grid(row=19, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        self.lbl_mp_detail.grid(row=20, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     def _build_tab_test(self, nb) -> None:
         tab = self._scrollable_tab(nb, "Test")
@@ -1279,11 +1284,23 @@ class ImbabotGUI:
                      f"Contracts:  {p.contracts}{'  (capped)' if p.capped else ''}",
                 foreground=GREEN_H)
             self.lbl_mp_sizing.configure(
-                text=f"TP ${p.target_dollars:,.0f} reached at {p.tp_distance_points:.0f}pt "
-                     f"(~${p.achievable_dollars:,.0f}); stop loses ~${p.sl_bracket_dollars:,.0f}.")
+                text=f"Recommended TP:  ${p.recommended_tp_dollars:,.0f}  "
+                     f"({p.max_contracts}ct max · {p.tp_distance_points:.0f}pt, reachable in the 1st-second spike)"
+                     f"     ·     your target ${p.target_dollars:,.0f} → {p.contracts}ct, "
+                     f"hits ~${p.achievable_dollars:,.0f}; stop ~${p.sl_bracket_dollars:,.0f}.")
+            # Alert only when the entered target can't be reached inside the contract cap.
+            if p.capped:
+                self.lbl_mp_alert.configure(
+                    text=f"⚠  Your ${p.target_dollars:,.0f} target needs ~{p.contracts_wanted} contracts — "
+                         f"capped at {p.max_contracts}. Aim for ~${p.recommended_tp_dollars:,.0f} "
+                         f"(or accept the smaller ${p.achievable_dollars:,.0f} fill).")
+                self.lbl_mp_alert.grid()
+            else:
+                self.lbl_mp_alert.grid_remove()
         else:
             self.lbl_mp_inputs.configure(text="➡  NO-TRADE — sit out today", foreground=RED_H)
             self.lbl_mp_sizing.configure(text="")
+            self.lbl_mp_alert.grid_remove()
         vix = f"VIX {mp.prior_vix:.1f}" if mp.prior_vix else "VIX n/a"
         self.lbl_mp_detail.configure(
             text=f"{vix}  ·  News: {mp.news_label}\n{mp.rationale}")

@@ -127,7 +127,7 @@ def _features(date: str, prior_vix: Optional[float]) -> dict:
 
 
 def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float] = None,
-                 dollars_per_point: float = DOLLARS_PER_POINT, max_contracts: int = 10,
+                 dollars_per_point: float = DOLLARS_PER_POINT, max_contracts: int = 5,
                  sl_points: float = DEF_SL, model: Optional[SpikeModel] = None) -> MorningTickPlan:
     """Assemble the Morning Plan for the next real trading SESSION (``date`` = "as of today";
     weekends/holidays roll to the next open). Predict the spike -> volatility, TRADE/NO-TRADE, $TP."""

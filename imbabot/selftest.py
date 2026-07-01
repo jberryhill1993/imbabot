@@ -489,6 +489,16 @@ def run_selftest() -> int:
     notrade = tp_plan_from_spike(12.0, 800.0, min_spread=10.0)    # too small -> NO-TRADE
     _check("sizing: too-small spike -> NO-TRADE", not notrade.feasible)
 
+    # 11g2) 5-contract cap alert + recommended TP $
+    capd = tp_plan_from_spike(24.0, 2000.0, min_spread=10.0)      # $2k target exceeds the 5ct cap
+    _check("sizing: contracts capped at 5", capd.contracts <= 5 and capd.max_contracts == 5,
+           f"got {capd.contracts}/{capd.max_contracts}")
+    _check("sizing: cap alert fires (wanted > cap)", capd.capped and capd.contracts_wanted > 5,
+           f"capped={capd.capped} wanted={capd.contracts_wanted}")
+    _check("sizing: recommended TP = cap * T * $20",
+           capd.recommended_tp_dollars == 5 * capd.tp_distance_points * 20.0,
+           f"got {capd.recommended_tp_dollars}")
+
     # 11h) news calendar impact levels
     from .analysis import calendar as econ
     _check("calendar: NFP first Friday HIGH",
