@@ -74,6 +74,10 @@ def analyze_ticks(source: Optional[str | Path] = None, **kw) -> List[TickDayAnal
 # (e.g. 4/13, predicted 19.6) that sat just over the old line.
 TRADE_MIN = 20.0
 BIG_MIN = 28.0
+# Overnight-gap whipsaw filter (259-day re-analysis): opens within ~40pt of the prior NQ close
+# are chop — 30% clean vs ~49% otherwise (n=64); on TRADE days OOS the filter lifts win 50%->58%
+# and $65.7->$104.5/day/ct (threshold-insensitive 30-60pt) and skips the live 6/29 whipsaw.
+GAP_MIN = 40.0
 
 
 @dataclass
@@ -91,6 +95,8 @@ class MorningTickPlan:
     conviction: str            # STRONG | MODERATE | LOW
     rationale: str
     plan: SpikePlan
+    overnight_gap: Optional[float] = None  # |latest NQ − prior close| pts; None = quote unavailable
+    gap_filtered: bool = False             # True when a TRADE was downgraded by the small-gap rule
 
 
 def _recent_thrust(date: str, k: int = 10) -> float:
@@ -128,7 +134,8 @@ def _features(date: str, prior_vix: Optional[float]) -> dict:
 
 def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float] = None,
                  dollars_per_point: float = DOLLARS_PER_POINT, max_contracts: int = 5,
-                 sl_points: float = DEF_SL, model: Optional[SpikeModel] = None) -> MorningTickPlan:
+                 sl_points: float = DEF_SL, model: Optional[SpikeModel] = None,
+                 overnight_gap: Optional[float] = None) -> MorningTickPlan:
     """Assemble the Morning Plan for the next real trading SESSION (``date`` = "as of today";
     weekends/holidays roll to the next open). Predict the spike -> volatility, TRADE/NO-TRADE, $TP."""
     from datetime import date as _date
@@ -148,8 +155,21 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
     plan = tp_plan_from_spike(S, target_dollars, dollars_per_point=dollars_per_point,
                               max_contracts=max_contracts, sl_points=sl_points, min_spread=10.0)
 
+    # Overnight gap = |latest NQ − prior session close|, from the same public quote feed the
+    # header ticker uses (both values in one response; None if the fetch fails -> no filter).
+    gap = overnight_gap
+    if gap is None:
+        try:
+            from ..ticker import fetch_quote
+            q = fetch_quote()
+            if q and q.price and q.prev_close:
+                gap = abs(q.price - q.prev_close)
+        except Exception:
+            gap = None
+
     # TRADE/NO-TRADE by predicted spike SIZE (the walk-forward-validated signal). Win/loss
     # itself isn't predictable, so conviction reflects spike magnitude, not P(win).
+    gap_filtered = False
     if not model.calibrated:
         decision, conviction = "NO-TRADE", "LOW"
         rationale = "Predictor uncalibrated (ingest the full tick history first)."
@@ -157,6 +177,12 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
         decision, conviction = "NO-TRADE", "LOW"
         rationale = (f"Predicted opening spike only ~{S:.0f} pts — too small/choppy to clear a "
                      f">=10pt entry + TP. Historically these days are a coin-flip; sit out.")
+    elif gap is not None and gap <= GAP_MIN:
+        # Small-gap whipsaw filter: the open churns when overnight already settled near the close.
+        decision, conviction, gap_filtered = "NO-TRADE", "LOW", True
+        rationale = (f"Predicted spike ~{S:.0f} pts BUT the overnight gap is only ~{gap:.0f} pts "
+                     f"(<= {GAP_MIN:.0f}). Small-gap opens whipsaw — 30% winners historically vs "
+                     f"~50% otherwise; sit out.")
     else:
         decision = "TRADE"
         conviction = "STRONG" if S >= BIG_MIN else "MODERATE"
@@ -168,7 +194,8 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
         date=date, session_date=date, market_closed_today=market_closed_today,
         volatility=volatility_level(prior_vix, flag.score), prior_vix=prior_vix,
         news_label=flag.label, predicted_spike=S, p_big=pred.p_big, calibrated=model.calibrated,
-        decision=decision, conviction=conviction, rationale=rationale, plan=plan)
+        decision=decision, conviction=conviction, rationale=rationale, plan=plan,
+        overnight_gap=(round(gap, 1) if gap is not None else None), gap_filtered=gap_filtered)
 
 
 # ----------------------------------------------------------------- report

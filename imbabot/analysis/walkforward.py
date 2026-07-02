@@ -30,6 +30,7 @@ class WFRow:
     pnl_points: float
     p_big: float
     is_big: int
+    overnight_gap: float = 0.0
 
 
 def walk_forward(rows: List[DayRow], *, warm: int = 60, k: int = 25) -> List[WFRow]:
@@ -39,7 +40,8 @@ def walk_forward(rows: List[DayRow], *, warm: int = 60, k: int = 25) -> List[WFR
         pr = m.predict(rows[i].feats, k=k)
         r = rows[i]
         out.append(WFRow(r.date, pr.expected_spike, r.thrust, pr.p_clean,
-                         1 if r.label == "clean-winner" else 0, r.pnl_points, pr.p_big, r.is_big))
+                         1 if r.label == "clean-winner" else 0, r.pnl_points, pr.p_big, r.is_big,
+                         getattr(r, "overnight_gap", 0.0)))
     return out
 
 
@@ -71,7 +73,7 @@ class WFVerdict:
 
 
 def evaluate(rows: List[DayRow], *, warm: int = 60, k: int = 25,
-             conviction: float = 0.5, spike_min: float = 20.0) -> WFVerdict:
+             conviction: float = 0.5, spike_min: float = 20.0, gap_min: float = 40.0) -> WFVerdict:
     wf = walk_forward(rows, warm=warm, k=k)
     if not wf:
         return WFVerdict(0, float("nan"), 0, 0, 0, 0, 0, 0, 0, False, "Not enough data for walk-forward.")
@@ -83,6 +85,10 @@ def evaluate(rows: List[DayRow], *, warm: int = 60, k: int = 25,
     sel = [w for w in wf if w.pred_S >= spike_min]
     sel_net = (statistics.fmean(w.pnl_points for w in sel) * DOLLARS_PER_POINT) if sel else 0.0
     sel_win = statistics.fmean(w.clean for w in sel) if sel else 0.0
+    # Plus the overnight-gap whipsaw filter (small-gap opens churn): the live Morning-Plan rule.
+    gsel = [w for w in sel if w.overnight_gap > gap_min]
+    gsel_net = (statistics.fmean(w.pnl_points for w in gsel) * DOLLARS_PER_POINT) if gsel else 0.0
+    gsel_win = statistics.fmean(w.clean for w in gsel) if gsel else 0.0
     big_base = statistics.fmean(w.is_big for w in wf)
     topbig = sorted(wf, key=lambda w: w.pred_S, reverse=True)[:max(1, len(wf) // 3)]
     big_caught = statistics.fmean(w.is_big for w in topbig)
@@ -95,6 +101,8 @@ def evaluate(rows: List[DayRow], *, warm: int = 60, k: int = 25,
         f"  baseline (trade every day): net ${base_net:+.1f}/day/ct, win {base_win*100:.0f}%\n"
         f"  TRADE only predicted-spike>={spike_min:.0f} ({len(sel)} days): net ${sel_net:+.1f}/day/ct, "
         f"win {sel_win*100:.0f}%\n"
+        f"  ... + overnight-gap>{gap_min:.0f}pt whipsaw filter ({len(gsel)} days): net "
+        f"${gsel_net:+.1f}/day/ct, win {gsel_win*100:.0f}%  <- the live Morning-Plan rule\n"
         f"  actual 30+ pt opening days win {big_win*100:.0f}% (the money days); base rate "
         f"{big_base*100:.0f}%, top-third by predicted spike -> {big_caught*100:.0f}% actually big\n"
         f"  VERDICT: magnitude-based selection {'BEATS' if edge else 'does NOT beat'} baseline OOS "

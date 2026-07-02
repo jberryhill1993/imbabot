@@ -563,5 +563,25 @@ def run_selftest() -> int:
     _check("morning trade line == 20 (matches walkforward spike_min)",
            TRADE_MIN == 20.0, f"got {TRADE_MIN}")
 
+    # 12e) overnight-gap whipsaw filter: small-gap opens (<=40pt) churn -> a TRADE downgrades
+    # to NO-TRADE (validated: win 50->58%, $65.7->$104.5/day/ct OOS; skips the live 6/29 loss).
+    from .analysis.tick_runner import GAP_MIN
+    _check("gap filter threshold == 40", GAP_MIN == 40.0, f"got {GAP_MIN}")
+    mp_small = morning_plan("2026-06-24", target_dollars=800.0, overnight_gap=5.0)
+    mp_big = morning_plan("2026-06-24", target_dollars=800.0, overnight_gap=200.0)
+    # 6/24 predicts a tradeable spike; only the small-gap variant may downgrade it.
+    _check("gap filter: small gap downgrades TRADE -> NO-TRADE",
+           (not mp_small.gap_filtered) or mp_small.decision == "NO-TRADE",
+           f"got {mp_small.decision}/{mp_small.gap_filtered}")
+    _check("gap filter: big gap never gap-filters", not mp_big.gap_filtered,
+           f"got {mp_big.decision}/{mp_big.gap_filtered}")
+    if mp_big.decision == "TRADE":   # when the spike clears 20, verify the small-gap flip fires
+        _check("gap filter: flips this TRADE day", mp_small.gap_filtered and mp_small.decision == "NO-TRADE",
+               f"got {mp_small.decision}/{mp_small.gap_filtered}")
+
+    # 12f) DayRow carries overnight_gap (the dataset field the walk-forward filter reads)
+    from .analysis.tick_dataset import DayRow
+    _check("DayRow has overnight_gap", "overnight_gap" in DayRow.__dataclass_fields__)
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

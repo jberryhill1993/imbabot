@@ -1243,11 +1243,12 @@ class ImbabotGUI:
         try:
             from datetime import datetime
             from .analysis.tick_runner import morning_plan
-            # Pull fresh daily VIX so the model's prior-close feature isn't stale (it drives the
-            # spike prediction). Best-effort: refresh() falls back to the cache on any failure.
+            # Pull fresh daily VIX + NQ so the prior-close features (VIX level, overnight gap)
+            # aren't stale. Best-effort: refresh() falls back to the cache on any failure.
             try:
-                from .analysis.market_history import refresh, VIX_SYMBOL
+                from .analysis.market_history import refresh, VIX_SYMBOL, NQ_SYMBOL
                 refresh(VIX_SYMBOL)
+                refresh(NQ_SYMBOL)
             except Exception:
                 pass
             target = 800.0
@@ -1338,8 +1339,10 @@ class ImbabotGUI:
             vix = f"VIX {mp.prior_vix:.1f} (prior close){stale}"
         else:
             vix = "VIX n/a"
+        gap = (f"Gap {mp.overnight_gap:.0f}pt" if getattr(mp, "overnight_gap", None) is not None
+               else "Gap n/a")
         self.lbl_mp_detail.configure(
-            text=f"{vix}  ·  News: {mp.news_label}\n{mp.rationale}")
+            text=f"{vix}  ·  {gap}  ·  News: {mp.news_label}\n{mp.rationale}")
         self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
                  f"-> {p.contracts if (mp.decision=='TRADE' and p.feasible) else 0}ct")
         self._grow_to_content()

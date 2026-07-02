@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from . import calendar as econ
-from .market_history import VIX_SYMBOL, by_date, load_daily, prior_value
+from .market_history import NQ_SYMBOL, VIX_SYMBOL, by_date, load_daily, prior_value
 from .tick_data import TickDay, cached_dates, load_tickday
 from .tick_features import label_day, spike_metrics
 from .tick_sim import simulate_tick_straddle
@@ -40,12 +40,16 @@ class DayRow:
     pnl_points: float
     news_label: str
     prior_vix: Optional[float]
+    # |pre-open ref − prior NQ daily close|. NOT a kNN feature — the whipsaw filter: small-gap
+    # opens (<= ~40pt) churn (30% clean vs ~49%); big gaps resolve directionally.
+    overnight_gap: float = 0.0
 
 
 def build_dataset(dates: Optional[List[str]] = None) -> List[DayRow]:
     """Assemble DayRows from the cached tick days, in date order (no look-ahead)."""
     dates = sorted(dates or cached_dates())
     vbd = by_date(load_daily(VIX_SYMBOL))
+    nqd = by_date(load_daily(NQ_SYMBOL))
     rows: List[DayRow] = []
     recent: List[float] = []     # trailing realized thrusts for the regime feature
     for d in dates:
@@ -73,10 +77,14 @@ def build_dataset(dates: Optional[List[str]] = None) -> List[DayRow]:
             "dow": float(__import__("datetime").date.fromisoformat(d).weekday()),
             "recent_thrust": float(recent_thrust),
         }
+        ref = td.price_at(-3.0)
+        nq_prior = prior_value(nqd, d)
+        gap = abs(ref - nq_prior.c) if (ref is not None and nq_prior) else 0.0
         rows.append(DayRow(
             date=d, feats=feats, thrust=sm.thrust, counter_poke=sm.counter_poke,
             is_big=1 if sm.thrust >= BIG_PTS else 0, label=label_day(out),
-            pnl_points=out.pnl_points, news_label=flag.label, prior_vix=prior_vix))
+            pnl_points=out.pnl_points, news_label=flag.label, prior_vix=prior_vix,
+            overnight_gap=round(gap, 2)))
         recent.append(sm.thrust)
         if len(recent) > RECENT_K:
             recent.pop(0)
