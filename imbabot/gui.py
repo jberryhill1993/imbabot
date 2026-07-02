@@ -700,7 +700,7 @@ class ImbabotGUI:
         self.var_mp_target = tk.StringVar(value="800")
         ttk.Entry(tab, textvariable=self.var_mp_target, width=10, font=(FONT, 11)).grid(
             row=16, column=1, sticky="w", padx=6, pady=(8, 0))
-        ttk.Label(tab, text="(optional — for a SMALLER trade than the 5-contract max shown below)",
+        ttk.Label(tab, text="(drives the TopStep inputs below on Recalculate; capped at 5 contracts)",
                   style="Hint.TLabel").grid(row=16, column=2, columnspan=3, sticky="w", pady=(8, 0))
         # The one line that tells the user exactly what to type into Entry Points + Contracts.
         self.lbl_mp_inputs = ttk.Label(tab, text="", style="Hs.TLabel", foreground=GREEN_H)
@@ -1301,21 +1301,24 @@ class ImbabotGUI:
             text=f"{tag}  ·  {mp.conviction}  ·  Session: {sess}  ·  Vol {mp.volatility}  ·  "
                  f"spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{banner}{cal}")
         p = mp.plan
-        # Headline = the 5-contract MAX recommendation, as a plain "type this into TopStep" block.
+        # Headline = sized to the USER'S profit-target box (what to type into TopStep for that
+        # target). The 5-contract daily MAX is shown separately below it for reference.
         if mp.decision == "TRADE" and p.feasible:
             self.lbl_mp_inputs.configure(
-                text=(f"➡  ENTER IN TOPSTEP     Contracts:  {p.recommended_contracts}      "
+                text=(f"➡  ENTER IN TOPSTEP     Contracts:  {p.contracts}      "
                       f"Entry:  ±{p.entry_spread:.0f} pts      "
-                      f"Take-Profit:  ${p.recommended_tp_dollars:,.0f}      "
-                      f"Stop-Loss:  ${p.recommended_sl_dollars:,.0f}"),
+                      f"Take-Profit:  ${p.achievable_dollars:,.0f}      "
+                      f"Stop-Loss:  ${p.sl_bracket_dollars:,.0f}"),
                 foreground=GREEN_H)
-            sizing = (f"That's the max at {p.recommended_contracts} contracts — TP {p.tp_distance_points:.0f}pt, "
-                      f"reachable inside the ~1-second opening spike.")
-            # If the user's optional target is BELOW the max, show the smaller alternative.
-            if not p.capped and p.contracts < p.recommended_contracts and p.target_dollars < p.recommended_tp_dollars:
-                sizing += (f"     ·     smaller: your ${p.target_dollars:,.0f} → {p.contracts}ct, "
-                           f"TP ${p.achievable_dollars:,.0f} / SL ${p.sl_bracket_dollars:,.0f}.")
-            self.lbl_mp_sizing.configure(text=sizing)
+            sized = (f"Your ${p.target_dollars:,.0f} target exceeds the {p.max_contracts}-contract max — "
+                     f"sized to the max instead" if p.capped else
+                     f"Sized to your ${p.target_dollars:,.0f} target")
+            self.lbl_mp_sizing.configure(
+                text=(f"{sized} — TP {p.tp_distance_points:.0f}pt, "
+                      f"reachable inside the ~1-second opening spike."
+                      f"\nToday's MAX at {p.max_contracts} contracts:  "
+                      f"Take-Profit ${p.recommended_tp_dollars:,.0f}  ·  "
+                      f"Stop-Loss ${p.recommended_sl_dollars:,.0f}."))
             # Alert only when the entered target EXCEEDS what 5 contracts can reach.
             if p.capped:
                 self.lbl_mp_alert.configure(
