@@ -1,8 +1,10 @@
 """Fire-time scheduling, anchored to the US cash-equity open (09:30 America/New_York).
 
-The bot captures the reference price a few seconds *before* the open
-(``capture_offset_seconds``, default 3 -> 09:29:57) and treats that as the fire
-moment. Times are computed in the market's own timezone so DST is handled for you.
+The bot captures the reference price just *before* the open
+(``capture_offset_seconds``, default 1 -> 09:29:59) and treats that as the fire
+moment. Kept tight: orders resting longer pre-open get triggered by the last-seconds
+churn (measured −$4,660/yr at 4ct with a ~2s resting window). Times are computed in
+the market's own timezone so DST is handled for you.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ def _tz(name: str):
 
 def next_fire_time(
     open_time: dtime,
-    capture_offset_seconds: int = 3,
+    capture_offset_seconds: int = 1,
     market_tz: str = MARKET_TZ,
     now: Optional[datetime] = None,
 ) -> datetime:

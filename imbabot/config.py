@@ -84,7 +84,11 @@ class Settings:
     market_tz: str = "America/New_York"
     open_hour: int = 9
     open_minute: int = 30
-    capture_offset_seconds: int = 3   # capture price 3s before the open
+    # Capture the reference 1s before the open (was 3s). Orders resting longer pre-open get
+    # triggered by the last-seconds churn: 13/264 days crossed ±10 pre-open, −$4,660/yr at 4ct,
+    # and 4 of 5 outcome-flips turned winners into losers (incl. live 7/6/26). Keep the PC clock
+    # synced — a fast clock widens the real pre-open window regardless of this setting.
+    capture_offset_seconds: int = 1
 
     # --- test mode (fire at a custom local time to verify it works) ---
     test_mode: bool = False           # if True, fire at test_fire_time instead of the 09:30 open
@@ -136,6 +140,10 @@ class Settings:
         if not path.exists():
             return cls()
         raw = json.loads(path.read_text(encoding="utf-8"))
+        # Migration: 3s was the old default (never user-exposed in the GUI). Installs that
+        # persisted it inherit the new 1s default — see capture_offset_seconds above.
+        if raw.get("capture_offset_seconds") == 3:
+            raw.pop("capture_offset_seconds")
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in raw.items() if k in known})
 

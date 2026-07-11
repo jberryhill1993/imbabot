@@ -590,5 +590,19 @@ def run_selftest() -> int:
     _check("MorningTickPlan has gap_fresh",
            "gap_fresh" in type(mp_small).__dataclass_fields__)
 
+    # 12h) pre-open trigger fix: reference captured 1s before the open (was 3s — orders resting
+    # ~2s pre-open cost −$4,660/yr at 4ct; 4 of 5 outcome-flips were winners turned losers).
+    from .config import Settings as _S
+    _check("capture offset default == 1s", _S().capture_offset_seconds == 1,
+           f"got {_S().capture_offset_seconds}")
+    import json as _json, tempfile as _tf, os as _os
+    with _tf.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        fh.write(_json.dumps({"capture_offset_seconds": 3, "username": "x"}))
+        _p = fh.name
+    migrated = _S.load(__import__("pathlib").Path(_p))
+    _os.unlink(_p)
+    _check("capture offset migration: stored 3 -> 1", migrated.capture_offset_seconds == 1,
+           f"got {migrated.capture_offset_seconds}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
