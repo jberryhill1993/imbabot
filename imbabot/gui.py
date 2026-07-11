@@ -1339,8 +1339,11 @@ class ImbabotGUI:
             vix = f"VIX {mp.prior_vix:.1f} (prior close){stale}"
         else:
             vix = "VIX n/a"
-        gap = (f"Gap {mp.overnight_gap:.0f}pt" if getattr(mp, "overnight_gap", None) is not None
-               else "Gap n/a")
+        if getattr(mp, "overnight_gap", None) is not None:
+            early = "" if getattr(mp, "gap_fresh", True) else " (early ⚠)"
+            gap = f"Gap {mp.overnight_gap:.0f}pt{early}"
+        else:
+            gap = "Gap n/a"
         self.lbl_mp_detail.configure(
             text=f"{vix}  ·  {gap}  ·  News: {mp.news_label}\n{mp.rationale}")
         self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "

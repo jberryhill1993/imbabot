@@ -97,6 +97,7 @@ class MorningTickPlan:
     plan: SpikePlan
     overnight_gap: Optional[float] = None  # |latest NQ − prior close| pts; None = quote unavailable
     gap_filtered: bool = False             # True when a TRADE was downgraded by the small-gap rule
+    gap_fresh: bool = True                 # False when measured >60min before the open (filter skipped)
 
 
 def _recent_thrust(date: str, k: int = 10) -> float:
@@ -166,6 +167,18 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
                 gap = abs(q.price - q.prev_close)
         except Exception:
             gap = None
+    # The gap is only meaningful near the open: measured hours early it under-reads (the overnight
+    # move hasn't happened yet — live 7/8 read 30pt at recalc vs ~196pt at the bell). Apply the
+    # whipsaw filter ONLY when measured within 60 min of the session open; otherwise show a caveat.
+    gap_fresh = True
+    try:
+        from datetime import datetime, time as _time, timedelta
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/New_York")
+        open_dt = datetime.combine(session, _time(9, 30), tzinfo=tz)
+        gap_fresh = datetime.now(tz) >= open_dt - timedelta(minutes=60)
+    except Exception:
+        pass
 
     # TRADE/NO-TRADE by predicted spike SIZE (the walk-forward-validated signal). Win/loss
     # itself isn't predictable, so conviction reflects spike magnitude, not P(win).
@@ -177,7 +190,7 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
         decision, conviction = "NO-TRADE", "LOW"
         rationale = (f"Predicted opening spike only ~{S:.0f} pts — too small/choppy to clear a "
                      f">=10pt entry + TP. Historically these days are a coin-flip; sit out.")
-    elif gap is not None and gap <= GAP_MIN:
+    elif gap is not None and gap <= GAP_MIN and gap_fresh:
         # Small-gap whipsaw filter: the open churns when overnight already settled near the close.
         decision, conviction, gap_filtered = "NO-TRADE", "LOW", True
         rationale = (f"Predicted spike ~{S:.0f} pts BUT the overnight gap is only ~{gap:.0f} pts "
@@ -190,12 +203,16 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
         rationale = (f"Predicted opening spike ~{S:.0f} pts (P(30+)={pred.p_big*100:.0f}%){big}. "
                      f"Sized to hit ${target_dollars:,.0f}. Note: spike SIZE is predictable; the "
                      f"win/loss on any single day is not — respect the stop.")
+    if not gap_fresh:
+        rationale += (" [gap measured early — the overnight move isn't done; recalc 08:15–08:29 CT "
+                      "for an accurate gap check]")
     return MorningTickPlan(
         date=date, session_date=date, market_closed_today=market_closed_today,
         volatility=volatility_level(prior_vix, flag.score), prior_vix=prior_vix,
         news_label=flag.label, predicted_spike=S, p_big=pred.p_big, calibrated=model.calibrated,
         decision=decision, conviction=conviction, rationale=rationale, plan=plan,
-        overnight_gap=(round(gap, 1) if gap is not None else None), gap_filtered=gap_filtered)
+        overnight_gap=(round(gap, 1) if gap is not None else None), gap_filtered=gap_filtered,
+        gap_fresh=gap_fresh)
 
 
 # ----------------------------------------------------------------- report

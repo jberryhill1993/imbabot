@@ -583,5 +583,12 @@ def run_selftest() -> int:
     from .analysis.tick_dataset import DayRow
     _check("DayRow has overnight_gap", "overnight_gap" in DayRow.__dataclass_fields__)
 
+    # 12g) gap freshness: PAST sessions are always "fresh" (filter applies); the field exists so a
+    # too-early recalc (>60min before a FUTURE open) skips the filter with a caveat instead.
+    _check("gap freshness: past session counts as fresh (filter active)",
+           mp_small.gap_fresh, f"got {mp_small.gap_fresh}")
+    _check("MorningTickPlan has gap_fresh",
+           "gap_fresh" in type(mp_small).__dataclass_fields__)
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
