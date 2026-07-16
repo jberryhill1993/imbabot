@@ -744,5 +744,185 @@ def run_selftest() -> int:
     except TradovateAuthError as exc:
         _check("tdv bad creds raise", "Incorrect" in str(exc))
 
+    # 13e) TradovateClient REST + order mapping — scripted transport, no sockets.
+    from .tradovate.client import (ACTION_MAP, ORDER_TYPE_MAP, TradovateClient,
+                                   TradovateError, bracket_prices)
+    from .tradovate import safety as tdv_safety
+
+    _check("tdv order-type map covers every engine type",
+           set(ORDER_TYPE_MAP) == {OrderType.LIMIT, OrderType.MARKET,
+                                   OrderType.STOP_LIMIT, OrderType.STOP,
+                                   OrderType.TRAILING_STOP})
+    _check("tdv action map", ACTION_MAP[OrderSide.BUY] == "Buy"
+           and ACTION_MAP[OrderSide.SELL] == "Sell")
+
+    # bracket math: BUY entry 21012, SL 48 ticks below, TP 56 above (0.25 tick)
+    sl, tp = bracket_prices(OrderSide.BUY, 21012.0, 48, 56, 0.25)
+    _check("tdv OSO bracket BUY: SL below / TP above",
+           sl == 21000.0 and tp == 21026.0, f"got {sl}/{tp}")
+    sl2, tp2 = bracket_prices(OrderSide.SELL, 20988.0, 48, 56, 0.25)
+    _check("tdv OSO bracket SELL mirrored",
+           sl2 == 21000.0 and tp2 == 20974.0, f"got {sl2}/{tp2}")
+    _check("tdv OSO bracket zero ticks -> no bracket",
+           bracket_prices(OrderSide.BUY, 21000.0, 0, 0, 0.25) == (None, None))
+
+    class _Rest:
+        """Scripted REST router for TradovateClient (records every call)."""
+        def __init__(self):
+            self.calls = []
+        def __call__(self, method, url, body, headers, timeout):
+            path = url.split("/v1/")[-1].split("?")[0]
+            self.calls.append((method, path, body))
+            if path == "auth/accesstokenrequest":
+                return 200, {"accessToken": "tok", "userId": 5,
+                             "expirationTime": "2099-01-01T00:00:00Z"}
+            if path == "account/list":
+                return 200, [{"id": 7001, "name": "DEMO7001", "active": True}]
+            if path == "contract/suggest":
+                return 200, [{"id": 900, "name": "MNQZ5", "contractMaturityId": 1},
+                             {"id": 901, "name": "MNQU6", "contractMaturityId": 2},
+                             {"id": 902, "name": "MNQZ6", "contractMaturityId": 3}]
+            if path == "contractMaturity/item":
+                exp = {1: "2025-12-19", 2: "2026-09-18", 3: "2026-12-18"}
+                mid = int(url.split("id=")[-1])
+                return 200, {"id": mid, "expirationDate": f"{exp[mid]}T13:30:00Z"}
+            if path == "product/find":
+                return 200, {"name": "MNQ", "tickSize": 0.25, "valuePerPoint": 2.0}
+            if path == "order/placeoso":
+                return 200, {"orderId": 111, "oso1Id": 112, "oso2Id": 113}
+            if path == "order/placeorder":
+                return 200, {"orderId": 120}
+            if path == "order/cancelorder":
+                return 200, {"commandId": 55}
+            if path == "order/liquidateposition":
+                return 200, {"orderId": 130}
+            if path == "order/list":
+                return 200, [{"id": 111, "accountId": 7001, "ordStatus": "Working",
+                              "action": "Buy", "contractId": 901},
+                             {"id": 119, "accountId": 7001, "ordStatus": "Filled",
+                              "action": "Sell", "contractId": 901}]
+            if path == "position/list":
+                return 200, [{"accountId": 7001, "contractId": 901, "netPos": -1,
+                              "netPrice": 21001.5},
+                             {"accountId": 7001, "contractId": 555, "netPos": 0}]
+            return 404, {}
+
+    rest = _Rest()
+    warns = []
+    s_c = Settings(backend="tradovate", tdv_environment="demo", tdv_username="u")
+    cl = TradovateClient(s_c, log=lambda m, level="info": warns.append((level, m)),
+                         http=rest, enable_ws=False)
+    cl.authenticate("u", "pw-direct")
+    _check("tdv client authenticates via password arg", cl.authenticated)
+    _check("tdv client generated a stable device id", len(s_c.tdv_device_id) == 32)
+    _check("tdv startup banner logged",
+           any("TRADOVATE CONNECTED" in m and "env=DEMO" in m and
+               "LIVE_TRADING=False" in m for _, m in warns))
+    _check("tdv banner leaks no secrets",
+           not any("pw-direct" in m for _, m in warns))
+
+    accts = cl.search_accounts()
+    _check("tdv accounts mapped", accts[0].id == 7001 and accts[0].name == "DEMO7001")
+
+    con = cl.resolve_contract("MNQ")
+    _check("tdv front month picked (nearest future expiry)",
+           con.name == "MNQU6" and con.id == "901", f"got {con.name}/{con.id}")
+    _check("tdv tick math from product", con.tick_size == 0.25 and con.tick_value == 0.5)
+
+    # bracketed straddle leg -> native OSO with absolute prices
+    from .models import StraddleLeg
+    leg = StraddleLeg(side=OrderSide.BUY, stop_price=21012.0, size=1,
+                      stop_loss_ticks=48, take_profit_ticks=56, custom_tag="imba-t")
+    res = cl.place_straddle_leg(7001, con.id, leg)
+    oso = next(b for m, p, b in rest.calls if p == "order/placeoso")
+    _check("tdv OSO placed + leg id written back",
+           res.success and leg.order_id == 111)
+    _check("tdv OSO body: symbol/action/type",
+           oso["symbol"] == "MNQU6" and oso["action"] == "Buy"
+           and oso["orderType"] == "Stop" and oso["stopPrice"] == 21012.0)
+    _check("tdv OSO body: isAutomated + accountSpec + customTag50",
+           oso["isAutomated"] is True and oso["accountSpec"] == "DEMO7001"
+           and oso["customTag50"] == "imba-t")
+    _check("tdv OSO bracket1 = protective sell stop @21000",
+           oso["bracket1"] == {"action": "Sell", "orderType": "Stop",
+                               "stopPrice": 21000.0}, f"got {oso['bracket1']}")
+    _check("tdv OSO bracket2 = sell limit TP @21026",
+           oso["bracket2"] == {"action": "Sell", "orderType": "Limit",
+                               "price": 21026.0}, f"got {oso['bracket2']}")
+
+    # naked leg -> plain placeorder + loud warning (no Position Brackets on Tradovate)
+    naked = StraddleLeg(side=OrderSide.SELL, stop_price=20988.0, size=1,
+                        stop_loss_ticks=0, take_profit_ticks=0, custom_tag="imba-n")
+    cl.place_straddle_leg(7001, con.id, naked)
+    po = [b for m, p, b in rest.calls if p == "order/placeorder"][-1]
+    _check("tdv naked leg uses placeorder (no brackets)",
+           "bracket1" not in po and po["orderType"] == "Stop")
+    _check("tdv naked leg warns loudly",
+           any(lvl == "warning" and "NAKED" in m for lvl, m in warns))
+
+    # engine flatten path: opposing market order
+    cl.place_order(account_id=7001, contract_id=con.id, order_type=OrderType.MARKET,
+                   side=OrderSide.SELL, size=1, custom_tag="imbabot-flatten-x")
+    mo = [b for m, p, b in rest.calls if p == "order/placeorder"][-1]
+    _check("tdv market flatten body", mo["orderType"] == "Market"
+           and mo["action"] == "Sell" and "stopPrice" not in mo)
+
+    _check("tdv cancel order", cl.cancel_order(7001, 111) is True)
+    _check("tdv liquidate position", cl.liquidate_position(7001, con.id).order_id == 130)
+
+    # open orders/positions via REST fallback (no WS in this test)
+    oo = cl.search_open_orders(7001)
+    _check("tdv open orders: working only, id-keyed",
+           len(oo) == 1 and oo[0]["id"] == 111, f"got {oo}")
+    pp = cl.search_open_positions(7001)
+    _check("tdv positions: signed netPos, zero rows dropped",
+           len(pp) == 1 and pp[0]["netPos"] == -1 and "type" not in pp[0], f"got {pp}")
+    from .engine import _net_position_value as _npv
+    _check("tdv position shape reads correctly in the engine",
+           _npv(pp[0]) == -1, f"got {_npv(pp[0])}")
+
+    # hard size guard (defense-in-depth under RiskGuard)
+    try:
+        cl.place_order(account_id=7001, contract_id=con.id,
+                       order_type=OrderType.MARKET, side=OrderSide.BUY,
+                       size=tdv_safety.MAX_POSITION_SIZE + 1)
+        _check("tdv hard size cap refuses", False, "no exception")
+    except tdv_safety.SafetyError:
+        _check("tdv hard size cap refuses", True)
+
+    # order failure mapping
+    class _RestFail(_Rest):
+        def __call__(self, method, url, body, headers, timeout):
+            if "placeorder" in url:
+                self.calls.append((method, url, body))
+                return 200, {"failureReason": "InvalidPrice",
+                             "failureText": "Price is invalid"}
+            return super().__call__(method, url, body, headers, timeout)
+
+    cl2 = TradovateClient(Settings(backend="tradovate", tdv_username="u"),
+                          http=_RestFail(), enable_ws=False)
+    cl2.authenticate("u", "pw")
+    cl2.resolve_contract("MNQ")
+    bad = cl2.place_order(account_id=7001, contract_id="901",
+                          order_type=OrderType.MARKET, side=OrderSide.BUY, size=1)
+    _check("tdv failure mapped to OrderResult",
+           bad.success is False and bad.error_message == "Price is invalid")
+
+    # live endpoint is un-constructable while LIVE_TRADING=False (source gate)
+    _check("tdv safety: LIVE_TRADING ships False", tdv_safety.LIVE_TRADING is False)
+    try:
+        TradovateClient(Settings(backend="tradovate", tdv_environment="live"),
+                        enable_ws=False)
+        _check("tdv live endpoint blocked at construction", False, "no exception")
+    except tdv_safety.SafetyError as exc:
+        _check("tdv live endpoint blocked at construction", "LIVE" in str(exc).upper())
+
+    # session_range / retrieve_bars are documented 0.2.5 limitations
+    try:
+        cl.session_range("901", None, None)
+        _check("tdv session_range raises (documented limitation)", False)
+    except TradovateError:
+        _check("tdv session_range raises (documented limitation)", True)
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
