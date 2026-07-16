@@ -729,21 +729,44 @@ class ImbabotGUI:
             row=16, column=1, sticky="w", padx=6, pady=(8, 0))
         ttk.Label(tab, text="(drives the TopStep inputs below on Recalculate; capped at 5 contracts)",
                   style="Hint.TLabel").grid(row=16, column=2, columnspan=3, sticky="w", pady=(8, 0))
-        # The one line that tells the user exactly what to type into Entry Points + Contracts.
+        # The headline that tells the user exactly what to type into TopStep, followed by the
+        # four stat cells (TP tinted green / SL tinted red) that carry the actual numbers.
         self.lbl_mp_inputs = ttk.Label(tab, text="", style="Hs.TLabel", foreground=GREEN_H)
         self.lbl_mp_inputs.grid(row=17, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        self.mp_cells = ttk.Frame(tab, style="Surface.TFrame")
+        self.mp_cells.grid(row=18, column=0, columnspan=5, sticky="w", pady=(6, 2))
+        self.cell_mp_ct = self._mp_cell(self.mp_cells, "CONTRACTS", 0, "plain")
+        self.cell_mp_entry = self._mp_cell(self.mp_cells, "ENTRY (PTS)", 1, "plain")
+        self.cell_mp_tp = self._mp_cell(self.mp_cells, "TAKE-PROFIT", 2, "green")
+        self.cell_mp_sl = self._mp_cell(self.mp_cells, "STOP-LOSS", 3, "red")
+        self.mp_cells.grid_remove()
         # Amber cap alert — shown only when the entered $TP would need > the contract cap (5).
-        self.lbl_mp_alert = ttk.Label(tab, text="", style="Hs.TLabel", foreground="#e8a13a",
+        self.lbl_mp_alert = ttk.Label(tab, text="", style="Hs.TLabel", foreground=AMBER,
                                       wraplength=860)
-        self.lbl_mp_alert.grid(row=18, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.lbl_mp_alert.grid(row=19, column=0, columnspan=5, sticky="w", pady=(4, 0))
         self.lbl_mp_alert.grid_remove()
         self.lbl_mp_sizing = ttk.Label(tab, text="", style="Sm.TLabel", wraplength=860)
-        self.lbl_mp_sizing.grid(row=19, column=0, columnspan=5, sticky="w", pady=(2, 0))
+        self.lbl_mp_sizing.grid(row=20, column=0, columnspan=5, sticky="w", pady=(2, 0))
         self.lbl_mp_detail = ttk.Label(
             tab, text="Enter a profit-target $, then Recalculate for the volatility, predicted spike, "
                       "TRADE/NO-TRADE, and the contracts + entry spread to use.",
             style="Sm.TLabel", wraplength=860)
-        self.lbl_mp_detail.grid(row=20, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        self.lbl_mp_detail.grid(row=21, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+    def _mp_cell(self, parent, title: str, col: int, kind: str = "plain"):
+        """One Morning-Plan stat cell: tiny uppercase title over a large mono value.
+        kind: 'plain' (elevated) | 'green' (tinted, TP) | 'red' (tinted, SL)."""
+        fr_style, ti_style, va_style = {
+            "plain": ("Cell.TFrame", "CellTitle.TLabel", "CellVal.TLabel"),
+            "green": ("TintGreen.TFrame", "TintTitleG.TLabel", "TintValG.TLabel"),
+            "red": ("TintRed.TFrame", "TintTitleR.TLabel", "TintValR.TLabel"),
+        }[kind]
+        cell = ttk.Frame(parent, style=fr_style, padding=(18, 10))
+        cell.grid(row=0, column=col, padx=(0 if col == 0 else 10, 0), sticky="nsew")
+        ttk.Label(cell, text=title, style=ti_style).pack(anchor="w")
+        val = ttk.Label(cell, text="—", style=va_style)
+        val.pack(anchor="w", pady=(3, 0))
+        return val
 
     def _build_tab_test(self, nb) -> None:
         tab = self._scrollable_tab(nb, "Test")
@@ -1329,15 +1352,15 @@ class ImbabotGUI:
             text=f"{tag}  ·  {mp.conviction}  ·  Session: {sess}  ·  Vol {mp.volatility}  ·  "
                  f"spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{banner}{cal}")
         p = mp.plan
-        # Headline = sized to the USER'S profit-target box (what to type into TopStep for that
-        # target). The 5-contract daily MAX is shown separately below it for reference.
+        # Headline + 4 stat cells = sized to the USER'S profit-target box (what to type into
+        # TopStep for that target). The 5-contract daily MAX is shown separately below.
         if mp.decision == "TRADE" and p.feasible:
-            self.lbl_mp_inputs.configure(
-                text=(f"➡  ENTER IN TOPSTEP     Contracts:  {p.contracts}      "
-                      f"Entry:  ±{p.entry_spread:.0f} pts      "
-                      f"Take-Profit:  ${p.achievable_dollars:,.0f}      "
-                      f"Stop-Loss:  ${p.sl_bracket_dollars:,.0f}"),
-                foreground=GREEN_H)
+            self.lbl_mp_inputs.configure(text="➡  ENTER IN TOPSTEP", foreground=GREEN_H)
+            self.cell_mp_ct.configure(text=f"{p.contracts}")
+            self.cell_mp_entry.configure(text=f"±{p.entry_spread:.0f}")
+            self.cell_mp_tp.configure(text=f"${p.achievable_dollars:,.0f}")
+            self.cell_mp_sl.configure(text=f"${p.sl_bracket_dollars:,.0f}")
+            self.mp_cells.grid()
             sized = (f"Your ${p.target_dollars:,.0f} target exceeds the {p.max_contracts}-contract max — "
                      f"sized to the max instead" if p.capped else
                      f"Sized to your ${p.target_dollars:,.0f} target")
@@ -1358,6 +1381,7 @@ class ImbabotGUI:
                 self.lbl_mp_alert.grid_remove()
         else:
             self.lbl_mp_inputs.configure(text="➡  NO-TRADE — sit out today", foreground=RED_H)
+            self.mp_cells.grid_remove()
             self.lbl_mp_sizing.configure(text="")
             self.lbl_mp_alert.grid_remove()
         # VIX shown is the PRIOR SESSION CLOSE (the model feature) — flag if the daily cache is stale.
