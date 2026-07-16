@@ -36,7 +36,10 @@ def run_webui() -> int:
         index.as_uri(),
         width=1280,
         height=860,
-        min_size=(1080, 700),
+        # 980x720 floor: 980 sits inside the <=1100px breakpoint (stats 2x2, single-column
+        # forms — verified to fit), 720 keeps the hero cards + action bar fully visible with
+        # the middle region scrolling internally. Below this the layout would break.
+        min_size=(980, 720),
         background_color="#0A0F1E",
     )
     webview.start()
