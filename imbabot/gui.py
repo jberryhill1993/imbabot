@@ -458,14 +458,15 @@ class ImbabotGUI:
         ttk.Separator(root).pack(fill="x", padx=20)
 
         # ===== hero HUD (animated arc-reactor gauge) =====
-        self.hud = HudHero(root, height=280)
-        self.hud.pack(fill="x", padx=20, pady=(12, 4))
-        self.lbl_count = self.hud.field("count")
-        self.lbl_fire = self.hud.field("fire")
-        self.lbl_price = self.hud.field("price")
-        self.lbl_range = self.hud.field("range")
-        self._hud_angle = 0.0
-        self.root.after(60, self._hud_animate)
+        # ===== hero stat cards (replaces the HudHero canvas; same 4 readouts, same
+        # .configure(text=…) update path — HudHero/_HudField stay in the file, dormant) =====
+        self.hud = None
+        hero = ttk.Frame(root, style="TFrame")
+        hero.pack(fill="x", padx=20, pady=(14, 6))
+        self.lbl_count = self._stat(hero, "T-minus to market open", 0, big=True)
+        self.lbl_fire = self._stat(hero, "Next fire", 1)
+        self.lbl_price = self._stat(hero, "Last price", 2)
+        self.lbl_range = self._stat(hero, "Overnight range", 3)
 
         # ===== control bar =====
         ctrl = ttk.Frame(root, style="TFrame", padding=(20, 2))
@@ -1452,9 +1453,10 @@ class ImbabotGUI:
         self.root.after(1000, self._tick_countdown)
 
     def _hud_animate(self) -> None:
-        if not self.root.winfo_exists():
+        """Dormant since the fintech-dashboard restyle (no HudHero instance; not scheduled)."""
+        if self.hud is None or not self.root.winfo_exists():
             return
-        self._hud_angle = (self._hud_angle + 2.2) % 360
+        self._hud_angle = (getattr(self, "_hud_angle", 0.0) + 2.2) % 360
         try:
             self.hud.animate(self._hud_angle)
         except Exception:
