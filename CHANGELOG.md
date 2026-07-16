@@ -6,6 +6,52 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.5-dev] - unreleased (branch `v0.2.5-dev`)
+
+### Added — Tradovate second broker (parallel to TopstepX)
+- **`imbabot/tradovate/` package**: direct Tradovate API integration.
+  - `auth.py` — access-token lifecycle: acquire (`accesstokenrequest` with
+    name/password/appId/appVersion/deviceId/cid/sec), proactive renewal at
+    T-10min (`renewaccesstoken`, GET with POST fallback), p-ticket penalty
+    backoff, p-captcha surfaced as a clear user action.
+  - `client.py` — full BrokerAdapter surface. Bracketed entries ride native
+    server-side **OSO** orders (absolute tick-snapped prices — survive crash/
+    disconnect); flatten stays engine-driven; `liquidateposition` reserved for
+    the kill switch. Contract resolution picks the front month and
+    sanity-checks tick math. All order bodies `isAutomated: true`.
+  - `ws.py` — user-sync + market-data WebSockets (`websocket-client`, daemon
+    threads): 2.5s client heartbeat, exponential-backoff reconnect with
+    fresh-token authorize → `user/syncrequest` resync → quote re-subscribe;
+    order/position caches feed the unchanged 0.5s OCO poll (REST fallback if
+    the socket is unhealthy).
+  - `safety.py` — **hard-coded** gates: `LIVE_TRADING=False` (live endpoint
+    un-constructable until edited in source), `MAX_POSITION_SIZE=2` (per-order
+    + projected net), `MAX_DAILY_LOSS=$500` kill switch (cancel-all +
+    liquidate + block until restart/new day). Startup banner states
+    env/endpoint/account/gates on every connect.
+- **`imbabot/broker.py`** — BrokerAdapter Protocol codifying the duck-typed
+  engine⇄client contract; selftest pins ProjectX/Tradovate/fakes conformance.
+- **Both UIs**: Tradovate backend selector, credential form (username/password/
+  cid/secret → Windows Credential Manager via "Remember", or session-only),
+  demo/live selector with live-lock warning, TDV DEMO/LIVE badge.
+- **`scripts/tdv_demo_check.py`** — gated demo integration probe (auth,
+  sockets, contract, quote, OSO place/modify/cancel, forced-reconnect resync,
+  optional fill+liquidate), all 1-contract, demo-only.
+- Engine: single constructor branch routes `backend="tradovate"`; everything
+  else (strategy, risk, OCO monitor, flatten, dry-run gate) unchanged and
+  shared across brokers.
+- Config: `tdv_*` settings (non-secret) + `store/load/clear_tradovate_credentials`
+  (keyring → 0600-file fallback, `IMBABOT_TDV_*` env override).
+- Dependency: `websocket-client>=1.7`. Selftest: 121 → **215** checks, all
+  offline.
+
+### Notes
+- `session_range`/`retrieve_bars` are not yet supported on the Tradovate
+  backend (dashboard shows “—”; the Morning Plan is Databento-backed and
+  unaffected).
+- Account roles: TopStep PRAC = testing venue; Tradovate = eventual live
+  (locked until the demo check passes and `safety.py` is deliberately edited).
+
 ## [0.2.3] - 2026-07-15 (released to `main`, tagged `v0.2.3`)
 
 First stable release since 0.2.0.1. Promotes the tick-data Morning Plan line and the new

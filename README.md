@@ -233,6 +233,65 @@ $99/yr for notarization; a Windows signing cert). Not required — just nicer.
 
 ---
 
+## Tradovate backend (0.2.5+, second broker)
+
+A second, parallel execution venue next to TopstepX: a direct Tradovate API
+connection (REST + WebSocket). Same strategy, same engine, same OCO monitor —
+only the execution layer differs. Pick **Tradovate** in the Connect tab's
+backend selector.
+
+**Endpoints & safety.** DEMO (`demo.tradovateapi.com`) is the default and the
+only endpoint this build will connect to: the LIVE endpoint is hard-gated by
+`imbabot/tradovate/safety.py` (`LIVE_TRADING = False`, a source-level constant —
+not a setting). Also compiled in: `MAX_POSITION_SIZE = 2` (per-order AND
+projected net position, beneath the usual `max_contracts` guard) and
+`MAX_DAILY_LOSS = $500` — a breach cancels all working orders, liquidates, and
+blocks new orders until restart + a new day. `dry_run` starts ON as always.
+
+**Brackets are native.** On Tradovate the bot places entry stops as server-side
+OSO orders (bracket SL/TP live at the venue and survive a crash or disconnect).
+There is no TopStep-style "Position Brackets" backstop, so keep the bot
+SL/TP toggles ON for Tradovate — a naked entry there is truly naked (the bot
+warns loudly). Also set Tradovate's own account risk settings as the
+platform-side backstop.
+
+**Data.** Fills/orders/positions arrive over Tradovate's user-sync WebSocket;
+quotes over the market-data WebSocket (requires a CME market-data subscription
+valid for API usage). The overnight-range panel and history probes are not
+supported on this backend yet (0.2.5 limitation — the Morning Plan analyzer
+stays Databento-backed and works regardless of backend).
+
+### Tradovate onboarding (one-time, before the demo check)
+1. Tradovate account that can log in at trader.tradovate.com (demo is fine).
+2. Buy the **API Access** add-on (Application Settings → API Access, ~$25/mo).
+3. Generate an API key there: record the **cid** and **secret**; register the
+   app name (default `Imbabot`).
+4. Add the **CME market-data subscription** for API usage (quotes won't flow
+   without it).
+5. Log in once via the Tradovate website from the computer that will run the
+   bot (satisfies device/captcha verification so API logins aren't challenged).
+6. In Imbabot's Connect tab pick **Tradovate**, enter username / password /
+   cid / secret yourself. "Remember on this device" stores them in the Windows
+   Credential Manager (never in files, never in the log). Headless alternative:
+   `IMBABOT_TDV_USER/PASSWORD/CID/SEC` environment variables.
+
+### Demo integration check (required before anything else)
+```
+python scripts/tdv_demo_check.py            # read-only-ish: far-from-market order, then cancel
+python scripts/tdv_demo_check.py --fill     # optionally also fill + liquidate 1 lot on demo
+```
+All steps must PASS (auth, sockets, contract, quote, OSO place/modify/cancel,
+forced-reconnect resync). Then rehearse the engine itself on demo: Test tab →
+auto-fire at a quiet time, 1 contract, dry-run first, then a real demo fire.
+
+### Going live on Tradovate (deliberate, later)
+Only after the demo check and an engine rehearsal pass: edit
+`imbabot/tradovate/safety.py` → `LIVE_TRADING = True`, re-run
+`python -m imbabot.cli selftest`, switch Environment to **live** in the
+Connect tab, and confirm the red **TDV LIVE** badge + startup banner. The
+account roles are: **TopStep PRAC = testing**, **Tradovate = live capital** —
+never flip live on a whim; the gate is in source on purpose.
+
 ## Browser backend (fallback)
 
 If you don't want the API add-on, Imbabot can drive the trading site in a real
