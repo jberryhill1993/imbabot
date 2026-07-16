@@ -1016,5 +1016,34 @@ def run_selftest() -> int:
     _check("tdv quotes: stale after 10s -> None", qc.last_price("MNQU6") is None)
     _check("tdv quotes: unknown symbol -> None", qc.last_price("ESU6") is None)
 
+    # 13g) safety guards end-to-end on the client (kill switch + projected cap)
+    _check("tdv safety constants are hard-coded sane values",
+           tdv_safety.MAX_POSITION_SIZE == 2 and tdv_safety.MAX_DAILY_LOSS == 500.0)
+
+    # projected |netPos| + size may not exceed MAX_POSITION_SIZE: the scripted
+    # book already holds net -1, so a 2-lot (1+2=3 > 2) must be refused while a
+    # 1-lot passes (the earlier flatten order proved 1-lot passes).
+    try:
+        cl.place_order(account_id=7001, contract_id=con.id,
+                       order_type=OrderType.MARKET, side=OrderSide.BUY, size=2)
+        _check("tdv projected-position cap refuses", False, "no exception")
+    except tdv_safety.SafetyError as exc:
+        _check("tdv projected-position cap refuses", "Projected" in str(exc))
+
+    # kill switch: tripping it blocks new orders and sweeps the book
+    n_before = len(rest.calls)
+    cl._trip_kill("daily realized P&L -520.00 breached -$500")
+    swept = [(m, p) for m, p, b in rest.calls[n_before:]]
+    _check("tdv kill sweep cancels working orders",
+           ("POST", "order/cancelorder") in swept, f"got {swept}")
+    _check("tdv kill sweep liquidates open positions",
+           ("POST", "order/liquidateposition") in swept, f"got {swept}")
+    try:
+        cl.place_order(account_id=7001, contract_id=con.id,
+                       order_type=OrderType.MARKET, side=OrderSide.BUY, size=1)
+        _check("tdv kill switch blocks new orders", False, "no exception")
+    except tdv_safety.SafetyError as exc:
+        _check("tdv kill switch blocks new orders", "Kill switch" in str(exc))
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
