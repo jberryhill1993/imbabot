@@ -330,7 +330,7 @@ class ImbabotGUI:
         st.configure("CardTitle.TLabel", background=CARD, foreground=MUTED, font=(FONT, 9, "bold"))
         st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(MONO, 18, "bold"))
         st.configure("CardBig.TLabel", background=CARD, foreground=FG, font=(MONO, 30, "bold"))
-        st.configure("Banner.TLabel", background=BG, foreground=MUTED, font=(FONT, 11, "bold"))
+        st.configure("Banner.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 11, "bold"))
         # semantic tinted stat cells (Morning Plan TP/SL): colored value on faint tinted field
         st.configure("TintGreen.TFrame", background=GREEN_TINT, bordercolor=GREEN_TINT_BR,
                      relief="solid", borderwidth=1)
@@ -457,7 +457,6 @@ class ImbabotGUI:
         self.badge_armed.pack(side="left", padx=4)
         ttk.Separator(root).pack(fill="x", padx=20)
 
-        # ===== hero HUD (animated arc-reactor gauge) =====
         # ===== hero stat cards (replaces the HudHero canvas; same 4 readouts, same
         # .configure(text=…) update path — HudHero/_HudField stay in the file, dormant) =====
         self.hud = None
@@ -468,9 +467,10 @@ class ImbabotGUI:
         self.lbl_price = self._stat(hero, "Last price", 2)
         self.lbl_range = self._stat(hero, "Overnight range", 3)
 
-        # ===== control bar =====
-        ctrl = ttk.Frame(root, style="TFrame", padding=(20, 2))
-        ctrl.pack(fill="x")
+        # ===== action card: ARM · mode banner · FLATTEN · EMERGENCY STOP =====
+        # Safety-critical controls stay full-size and top-level (never buried in a tab).
+        ctrl = ttk.Frame(root, style="Surface.TFrame", padding=(16, 12))
+        ctrl.pack(fill="x", padx=20, pady=(6, 4))
         self.btn_arm = ttk.Button(ctrl, text="ARM", command=self._on_arm, style="Success.TButton", width=11)
         self.btn_arm.pack(side="left")
         self.lbl_mode_banner = ttk.Label(ctrl, text="", style="Banner.TLabel")
