@@ -35,12 +35,16 @@ document.getElementById("log-head").addEventListener("click", (e) => {
 /* Simulated countdown so the shell FEELS real during the visual review. */
 let tminus = 23 * 3600 + 59 * 60 + 51;
 const elT = document.getElementById("stat-tminus");
+const elSweep = document.getElementById("ring-sweep");
+const SWEEP_LEN = 188.5; /* 2πr for r=30 */
 setInterval(() => {
   tminus = (tminus - 1 + 86400) % 86400;
   const h = String(Math.floor(tminus / 3600)).padStart(2, "0");
   const m = String(Math.floor((tminus % 3600) / 60)).padStart(2, "0");
-  const s = String(tminus % 60).padStart(2, "0");
-  elT.textContent = `${h}:${m}:${s}`;
+  const s = tminus % 60;
+  elT.textContent = `${h}:${m}:${String(s).padStart(2, "0")}`;
+  /* Jarvis ring: the outer arc drains once per minute as the seconds count down */
+  if (elSweep) elSweep.style.strokeDashoffset = String(SWEEP_LEN * (1 - s / 60));
 }, 1000);
 
 /* Placeholder log lines (styled like the real Logger output). */

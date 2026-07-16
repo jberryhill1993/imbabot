@@ -17,12 +17,18 @@
     <div class="tick">
       <span class="sym">NQ</span>
       <span class="px num" id="nq-px">29,831.00</span>
-      <span class="chg up num" id="nq-chg">▲ +74.25 (+0.25%)</span>
+      <span class="chg up num" id="nq-chg">
+        <span class="chg-pts">▲ +74.25</span>
+        <span class="chg-pct">(+0.25%)</span>
+      </span>
     </div>
     <div class="tick">
       <span class="sym">VIX</span>
       <span class="px num" id="vix-px">15.74</span>
-      <span class="chg down num" id="vix-chg">▼ −0.10 (−0.63%)</span>
+      <span class="chg down num" id="vix-chg">
+        <span class="chg-pts">▼ −0.10</span>
+        <span class="chg-pct">(−0.63%)</span>
+      </span>
     </div>
     <div class="spacer"></div>
     <span class="pill ok" id="pill-conn"><span class="dot green"></span>CONNECTED</span>
@@ -32,9 +38,18 @@
 
   <!-- ═══════════ Row 2 · hero stat cards ═══════════ -->
   <section class="stats">
-    <div class="card stat">
+    <div class="card stat stat-jarvis">
       <div class="section-label">T-minus to market open</div>
-      <div class="value hero num" id="stat-tminus">23:59:51</div>
+      <div class="jarvis">
+        <svg class="ring" viewBox="0 0 72 72" width="64" height="64" aria-hidden="true">
+          <circle class="ring-base" cx="36" cy="36" r="30"/>
+          <circle class="ring-spin" cx="36" cy="36" r="30"/>
+          <circle class="ring-spin2" cx="36" cy="36" r="24"/>
+          <circle class="ring-sweep" cx="36" cy="36" r="30" id="ring-sweep"/>
+          <circle class="ring-core" cx="36" cy="36" r="4"/>
+        </svg>
+        <div class="value hero num" id="stat-tminus">23:59:51</div>
+      </div>
     </div>
     <div class="card stat">
       <div class="section-label">Next fire</div>

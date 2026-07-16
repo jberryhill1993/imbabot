@@ -117,7 +117,10 @@ body {
 }
 .tick .sym { font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; }
 .tick .px { font-size: 15px; font-weight: 700; }
-.tick .chg { font-size: 12px; font-weight: 600; }
+/* change block: points on top, (%) directly beneath — one compact stack right of the price */
+.tick .chg { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+.tick .chg-pts { font-size: 12px; font-weight: 700; }
+.tick .chg-pct { font-size: 11px; font-weight: 600; opacity: 0.9; }
 .up { color: var(--green); }
 .down { color: var(--red); }
 .flat { color: var(--text-muted); }
@@ -142,6 +145,41 @@ body {
 .stat .value { font-size: 26px; font-weight: 700; font-family: var(--mono); }
 .stat .value.hero { font-size: 34px; color: var(--cyan); text-shadow: 0 0 24px rgba(56,189,248,.25); }
 .stat .sub { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+
+/* Jarvis countdown: animated arc-reactor ring beside the digits */
+.stat-jarvis {
+  background: linear-gradient(160deg, rgba(36, 52, 84, 0.72), rgba(17, 24, 42, 0.55));
+  border-color: rgba(56, 189, 248, 0.28);
+}
+.jarvis { display: flex; align-items: center; gap: 14px; }
+.ring { flex: none; filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.55)); }
+.ring circle { fill: none; stroke: var(--cyan); }
+.ring-base { stroke: rgba(56, 189, 248, 0.18); stroke-width: 2; }
+.ring-core { fill: var(--cyan); stroke: none; opacity: 0.9; }
+.ring-spin {
+  stroke-width: 3; stroke-linecap: round;
+  stroke-dasharray: 28 22 8 36;               /* uneven HUD segments */
+  transform-origin: 50% 50%;
+  animation: spin 8s linear infinite;
+}
+.ring-spin2 {
+  stroke-width: 1.5; opacity: 0.55;
+  stroke-dasharray: 6 10 22 14;
+  transform-origin: 50% 50%;
+  animation: spin 5s linear infinite reverse;
+}
+.ring-sweep {
+  stroke-width: 3; stroke-linecap: round; opacity: 0.9;
+  stroke-dasharray: 188.5;                    /* 2πr, r=30 */
+  stroke-dashoffset: 188.5;
+  transform: rotate(-90deg);                  /* start at 12 o'clock */
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 0.9s linear;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 /* --------------------------------------------------------------- action bar */
 .actions { display: flex; align-items: center; gap: 14px; padding: 16px var(--pad-card); }
