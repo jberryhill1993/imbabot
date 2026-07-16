@@ -6,7 +6,37 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
-## [0.2.1] - Unreleased (in development on `v0.2.1-dev`)
+## [0.2.3] - 2026-07-15 (released to `main`, tagged `v0.2.3`)
+
+First stable release since 0.2.0.1. Promotes the tick-data Morning Plan line and the new
+glass web UI together. Trading logic (engine / strategy / projectx / OCO / scheduler /
+config formats) is unchanged from the 0.2.1 line that passed a live forward-test week — this
+release adds analysis + presentation, not order behavior.
+
+### Added
+- **Morning Plan analyzer** (advisory; never auto-applies) rebuilt on **Databento tbbo tick
+  data**: a k-NN opening-spike predictor fit on 264 sessions and gated by expanding-window
+  **walk-forward** (spike SIZE predictable, corr ~+0.53; win/loss is not, so TRADE/NO-TRADE
+  routes through predicted size ≥ 20 pt). Outputs the TopStep block sized to a $ target
+  (contracts · entry ±10 · **TP $** · **SL $**), a 5-contract cap alert + recommended TP,
+  and refreshes VIX/NQ dailies on every Recalculate.
+- **Overnight-gap whipsaw filter** — small-gap opens (≤ 40 pt) churn (30% clean vs ~49%),
+  downgraded to NO-TRADE, with a freshness guard (only applies when measured within 60 min
+  of the open; earlier recalcs show a caveat).
+- **Glass web UI** (pywebview + HTML/CSS/JS) as the default window: navy glassmorphic
+  dashboard, live tickers, ARM/FLATTEN/EMERGENCY-STOP action bar, Connect/Strategy/Test
+  tabs, Morning Plan card, fully responsive layout. Driven by a thin **js_api bridge** over
+  the existing engine ops (no trading-logic changes). The classic Tkinter GUI is retained —
+  launch with `Imbabot --classic`.
+- **Daily auto-fire scheduler** with self-re-arming that skips weekends **and US market
+  holidays** (`market_calendar`).
+
+### Changed
+- **Pre-open reference capture moved 3 s → 1 s** before the open (fixes early-trigger losses:
+  orders resting ~2 s pre-open were tripped by last-seconds churn). Settings migrate the old
+  default automatically.
+
+## [0.2.1] - superseded by 0.2.3
 
 New work and the decisions behind it go here as we build them. Nothing in this section
 ships until 0.2.1 is released (merged to `main`, `-dev` suffix dropped, tagged `v0.2.1`).
