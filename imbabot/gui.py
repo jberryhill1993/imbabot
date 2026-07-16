@@ -31,25 +31,33 @@ from .config import Settings, load_api_key, store_api_key, log_path
 from .logbus import Logger
 from .models import Account
 
-# ---- palette (arc-reactor / Jarvis HUD: cyan glow on near-black) ----
-BG = "#03070d"
-SURFACE = "#06121b"
-CARD = "#081a26"
-ELEV = "#0c2735"
-BORDER = "#0f3c4d"
-FG = "#bfeffb"
-MUTED = "#3f8197"
-ACCENT = "#00e5ff"
-ACCENT_H = "#62f1ff"
-GREEN = "#00e6a0"
-GREEN_H = "#43ffc4"
-RED = "#ff3b54"
-RED_H = "#ff6f82"
-AMBER = "#ffb02e"
-AMBER_H = "#ffc861"
-# extra HUD tones
-GLOW = "#0a6f86"     # dim cyan for glow underlays
-GRID = "#0a2330"     # faint grid / backdrop lines
+# ---- palette (modern fintech dashboard: soft navy cards, mint/coral semantics) ----
+# (previous arc-reactor palette, for rollback: BG #03070d SURFACE #06121b CARD #081a26
+#  ELEV #0c2735 BORDER #0f3c4d FG #bfeffb MUTED #3f8197 ACCENT #00e5ff/#62f1ff
+#  GREEN #00e6a0/#43ffc4 RED #ff3b54/#ff6f82 AMBER #ffb02e/#ffc861 GLOW #0a6f86 GRID #0a2330)
+BG = "#0B1120"        # page: very dark desaturated navy
+SURFACE = "#131B2E"   # panel
+CARD = "#16203A"      # card
+ELEV = "#1B2742"      # elevated chip / hover
+BORDER = "#26314D"    # 1px low-contrast blue-gray borders
+FG = "#E8EDF5"        # soft white text
+MUTED = "#7D8CA6"     # secondary / labels
+ACCENT = "#38BDF8"    # interactive / info (cyan-blue)
+ACCENT_H = "#6FD0FF"
+GREEN = "#3DDC97"     # bullish / positive / active
+GREEN_H = "#6BEBB4"
+RED = "#F45B69"       # bearish / negative / danger
+RED_H = "#FF7D89"
+AMBER = "#F5B759"     # warning / highlight
+AMBER_H = "#FFD08A"
+# semantic tinted fills (stat cells: green value on faint green field, red on faint red)
+GREEN_TINT = "#12281F"
+GREEN_TINT_BR = "#1F4D38"
+RED_TINT = "#2A1721"
+RED_TINT_BR = "#572733"
+# legacy HUD tones (HudHero is dormant; kept so the class still compiles)
+GLOW = "#1B2742"
+GRID = "#141D33"
 
 FONT = "Segoe UI" if sys.platform.startswith("win") else ("Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans")
 MONO = "Consolas" if sys.platform.startswith("win") else ("Menlo" if sys.platform == "darwin" else "DejaVu Sans Mono")
