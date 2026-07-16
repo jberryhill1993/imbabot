@@ -47,9 +47,15 @@ class BotEngine:
     ) -> None:
         self.settings = settings
         if client is None:
-            from .projectx import ProjectXClient  # lazy: avoids requests on offline paths
+            # Lazy imports: avoid pulling requests/websocket on offline paths.
+            if settings.backend == "tradovate":
+                from .tradovate import TradovateClient
 
-            client = ProjectXClient(base_url=settings.base_url)
+                client = TradovateClient(settings, log=log or (lambda *a, **k: None))
+            else:
+                from .projectx import ProjectXClient
+
+                client = ProjectXClient(base_url=settings.base_url)
         self.client = client
         self.risk = RiskGuard(settings)
         self._log: LogFn = log or (lambda *a, **k: None)
@@ -71,8 +77,12 @@ class BotEngine:
     # ------------------------------------------------------------ connection
     def connect(self, api_key: str) -> None:
         s = self.settings
-        self.log(f"Authenticating as {s.username} @ {s.base_url} …")
-        self.client.authenticate(s.username, api_key)
+        if s.backend == "tradovate":
+            user, venue = s.tdv_username, f"Tradovate {s.tdv_environment.upper()}"
+        else:
+            user, venue = s.username, s.base_url
+        self.log(f"Authenticating as {user} @ {venue} …")
+        self.client.authenticate(user, api_key)
         self.log("Authenticated. Token acquired.")
         self.account = self._pick_account()
         self.log(

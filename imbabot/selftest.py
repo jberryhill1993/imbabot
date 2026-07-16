@@ -1016,6 +1016,17 @@ def run_selftest() -> int:
     _check("tdv quotes: stale after 10s -> None", qc.last_price("MNQU6") is None)
     _check("tdv quotes: unknown symbol -> None", qc.last_price("ESU6") is None)
 
+    # 13f2) engine constructor routes backend="tradovate" to TradovateClient
+    # (construction is offline — auth/network happen only at connect()).
+    eng_tdv = BotEngine(Settings(backend="tradovate"))
+    _check("engine builds TradovateClient for backend=tradovate",
+           type(eng_tdv.client).__name__ == "TradovateClient",
+           f"got {type(eng_tdv.client).__name__}")
+    eng_px = BotEngine(Settings(backend="api"))
+    _check("engine still builds ProjectXClient for backend=api",
+           type(eng_px.client).__name__ == "ProjectXClient",
+           f"got {type(eng_px.client).__name__}")
+
     # 13g) safety guards end-to-end on the client (kill switch + projected cap)
     _check("tdv safety constants are hard-coded sane values",
            tdv_safety.MAX_POSITION_SIZE == 2 and tdv_safety.MAX_DAILY_LOSS == 500.0)

@@ -8,7 +8,11 @@ job (JS confirm()); this layer never prompts.
 
 SECURITY: the API key is WRITE-ONLY. It is accepted by connect(), passed to the
 engine / keyring exactly like the classic GUI, and never returned, logged, or
-included in any state payload (get_settings exposes only `has_key`).
+included in any state payload (get_settings exposes only `has_key`). The same
+rule covers the Tradovate secrets (password/cid/sec): they arrive in the
+connect() payload under "tdv_secrets", go straight to the keyring (if remember)
+or to the client's session-only override, and never appear in settings.json,
+logs, or any response.
 """
 from __future__ import annotations
 
@@ -18,7 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from ..config import Settings, load_api_key, store_api_key
+from ..config import (Settings, load_api_key, load_tradovate_credentials,
+                      store_api_key, store_tradovate_credentials)
 from ..logbus import Logger
 from ..models import Account
 
@@ -31,6 +36,8 @@ _SETTINGS_FIELDS = [
     ("contracts", int), ("bot_stop_loss", bool), ("bot_take_profit", bool),
     ("trade_mode", str), ("entry_order_type", str), ("entry_limit_offset_ticks", int),
     ("use_live_data", bool), ("dry_run", bool),
+    # Tradovate (non-secret; password/cid/sec travel via connect()'s tdv_secrets)
+    ("tdv_environment", str), ("tdv_username", str), ("tdv_app_id", str),
 ]
 
 
@@ -94,6 +101,8 @@ class Api:
         s = self.settings
         out = {k: getattr(s, k) for k, _ in _SETTINGS_FIELDS}
         out["has_key"] = bool(s.username and load_api_key(s.username))
+        out["has_tdv_credentials"] = bool(
+            s.tdv_username and load_tradovate_credentials(s.tdv_username))
         out["account_name"] = s.account_name
         out["max_contracts"] = s.max_contracts
         return out
@@ -131,11 +140,16 @@ class Api:
     # -------------------------------------------------------------- connect
     def connect(self, payload: dict, api_key: str, remember: bool) -> dict:
         with self._lock:
+            # Secrets NEVER pass through _apply_settings (they'd land in settings.json).
+            payload = dict(payload or {})
+            tdv_secrets = payload.pop("tdv_secrets", None) or {}
             err = self._apply_settings(payload)
             if err:
                 return {"ok": False, "error": err}
             s = self.settings
             s.save()
+            if s.backend == "tradovate":
+                return self._connect_tradovate(s, tdv_secrets, remember)
             if s.backend == "browser":
                 # gui._launch_browser parity: a real Chrome opens; user logs in, then arms.
                 if self.controller is not None:
@@ -171,6 +185,50 @@ class Api:
                     "account_id": engine.account.id if engine.account else None,
                     "contract": (f"{c.name} ({c.id})  tick={c.tick_size} ${c.tick_value}/tick"
                                  if c else "")}
+
+    def _connect_tradovate(self, s: Settings, secrets: dict, remember: bool) -> dict:
+        """Tradovate branch of connect(). ``secrets`` = {password, cid, sec} from
+        the form (all optional if previously remembered). Secrets go to the
+        keyring when remember=True, otherwise ride the client's session-only
+        override — never settings.json, never the log, never a response."""
+        if not s.tdv_username:
+            return {"ok": False, "error": "Enter your Tradovate username."}
+        secrets = {k: str(v).strip() for k, v in (secrets or {}).items()
+                   if k in ("password", "cid", "sec") and str(v or "").strip()}
+        stored = load_tradovate_credentials(s.tdv_username) or {}
+        if not (secrets.get("password") or stored.get("password")):
+            return {"ok": False, "error": "Enter your Tradovate password."}
+        if not (secrets.get("cid") or stored.get("cid")) or \
+           not (secrets.get("sec") or stored.get("sec")):
+            return {"ok": False, "error":
+                    "Enter the API key cid + secret (Tradovate → API Access)."}
+        if remember and secrets:
+            blob = dict(stored)
+            blob.update(secrets)
+            blob["app_id"] = s.tdv_app_id or "Imbabot"
+            backend = store_tradovate_credentials(s.tdv_username, blob)
+            self.log(f"Tradovate credentials stored via {backend}.")
+        try:
+            from ..engine import BotEngine
+            engine = BotEngine(s, log=self.log)
+            if not remember and secrets:
+                engine.client.session_secrets = secrets
+            engine.connect(secrets.get("password", ""))
+            accounts = engine.list_accounts()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        self.engine, self.accounts = engine, accounts
+        s.save()   # persists the auto-generated tdv_device_id
+        self._poll_stop.clear()
+        threading.Thread(target=self._poll_worker, daemon=True).start()
+        c = engine.contract
+        return {"ok": True,
+                "env": s.tdv_environment,
+                "accounts": [{"id": a.id, "name": a.name, "can_trade": a.can_trade}
+                             for a in accounts],
+                "account_id": engine.account.id if engine.account else None,
+                "contract": (f"{c.name} ({c.id})  tick={c.tick_size} ${c.tick_value}/tick"
+                             if c else "")}
 
     def pick_account(self, account_id: int) -> dict:
         with self._lock:
@@ -425,6 +483,8 @@ class Api:
             "connected": self.engine is not None or self.controller is not None,
             "armed": bool(self.engine and self.engine.armed) or browser_armed,
             "dry_run": bool(s.dry_run),
+            "backend": s.backend,
+            "tdv_env": s.tdv_environment if s.backend == "tradovate" else None,
             "account": s.account_name or "",
             "nq": self._nq, "vix": self._vix,
             "last_price": self._last_price,

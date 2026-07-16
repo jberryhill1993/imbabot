@@ -27,7 +27,8 @@ except Exception as exc:  # pragma: no cover
     )
 
 from . import __version__
-from .config import Settings, load_api_key, store_api_key, log_path
+from .config import (Settings, load_api_key, store_api_key, log_path,
+                     load_tradovate_credentials, store_tradovate_credentials)
 from .logbus import Logger
 from .models import Account
 
@@ -600,9 +601,12 @@ class ImbabotGUI:
         ttk.Radiobutton(tab, text="API (TopstepX — recommended)", variable=self.var_backend,
                         value="api", command=self._on_backend_change, style="S.TRadiobutton").grid(
             row=0, column=1, sticky="w", padx=10)
+        ttk.Radiobutton(tab, text="Tradovate", variable=self.var_backend,
+                        value="tradovate", command=self._on_backend_change, style="S.TRadiobutton").grid(
+            row=0, column=2, sticky="w", padx=10)
         ttk.Radiobutton(tab, text="Browser automation", variable=self.var_backend,
                         value="browser", command=self._on_backend_change, style="S.TRadiobutton").grid(
-            row=0, column=2, sticky="w", padx=10)
+            row=0, column=3, sticky="w", padx=10)
 
         row2 = ttk.Frame(tab, style="Surface.TFrame")
         row2.grid(row=1, column=0, columnspan=4, sticky="w", pady=(10, 0))
@@ -632,6 +636,41 @@ class ImbabotGUI:
         self.btn_connect.grid(row=8, column=1, sticky="w")
         self.lbl_conn = ttk.Label(tab, text="not connected", style="Warn.TLabel")
         self.lbl_conn.grid(row=8, column=2, columnspan=2, sticky="w", padx=10)
+
+        # --- Tradovate credentials (visible only for the tradovate backend).
+        # Secrets go to the keyring (remember) or a session-only override —
+        # never to settings.json or the log.
+        self.var_tdv_env = tk.StringVar(value=self.settings.tdv_environment)
+        self.var_tdv_user = tk.StringVar(value=self.settings.tdv_username)
+        self.var_tdv_pass = tk.StringVar(value="")
+        self.var_tdv_cid = tk.StringVar(value="")
+        self.var_tdv_sec = tk.StringVar(value="")
+        self.frm_tdv = ttk.Frame(tab, style="Surface.TFrame")
+        self.frm_tdv.grid(row=9, column=0, columnspan=4, sticky="w", pady=(12, 0))
+
+        def _tdv_field(label: str, var, r: int, show=None, width=30):
+            ttk.Label(self.frm_tdv, text=label, style="Sm.TLabel").grid(
+                row=r, column=0, sticky="w", pady=4)
+            ent = ttk.Entry(self.frm_tdv, textvariable=var, width=width, font=(FONT, 11))
+            if show:
+                ent.configure(show=show)
+            ent.grid(row=r, column=1, sticky="w", padx=8)
+
+        ttk.Label(self.frm_tdv, text="Environment", style="Sm.TLabel").grid(
+            row=0, column=0, sticky="w", pady=4)
+        ttk.Combobox(self.frm_tdv, state="readonly", width=8, values=["demo", "live"],
+                     textvariable=self.var_tdv_env, font=(FONT, 11)).grid(
+            row=0, column=1, sticky="w", padx=8)
+        _tdv_field("Tradovate username", self.var_tdv_user, 1)
+        _tdv_field("Password", self.var_tdv_pass, 2, show="•", width=34)
+        _tdv_field("API key cid", self.var_tdv_cid, 3, width=14)
+        _tdv_field("API key secret", self.var_tdv_sec, 4, show="•", width=38)
+        ttk.Label(self.frm_tdv, style="Hint.TLabel", wraplength=560,
+                  text="Needs the Tradovate API Access add-on (cid + secret) and a CME "
+                       "market-data subscription for API usage. LIVE stays locked until "
+                       "safety.py LIVE_TRADING is enabled in source.").grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.frm_tdv.grid_remove()
 
     def _build_tab_strategy(self, nb) -> None:
         tab = self._scrollable_tab(nb, "Strategy")
@@ -851,6 +890,8 @@ class ImbabotGUI:
             s.entry_limit_offset_ticks = int(self.var_limit_off.get())
             s.use_live_data = bool(self.var_live_data.get())
             s.dry_run = bool(self.var_dry.get())
+            s.tdv_environment = self.var_tdv_env.get().strip() or "demo"
+            s.tdv_username = self.var_tdv_user.get().strip()
         except ValueError as exc:
             messagebox.showerror("Invalid input", f"Check the strategy numbers: {exc}")
             return None
@@ -889,21 +930,38 @@ class ImbabotGUI:
 
     def _update_mode_banner(self) -> None:
         if not self.var_dry.get():
-            self.lbl_mode_banner.configure(text="● LIVE — REAL ORDERS", foreground=RED_H)
+            text, color = "● LIVE — REAL ORDERS", RED_H
         else:
-            self.lbl_mode_banner.configure(text="● DRY-RUN — no orders sent", foreground=GREEN_H)
+            text, color = "● DRY-RUN — no orders sent", GREEN_H
+        if self.var_backend.get() == "tradovate":
+            env = (self.var_tdv_env.get() or "demo").upper()
+            text += f"   ·   TDV {env}"
+            if env == "LIVE":
+                color = RED_H
+        self.lbl_mode_banner.configure(text=text, foreground=color)
 
     # ------------------------------------------------------------- actions
     def _on_backend_change(self) -> None:
-        browser = self.var_backend.get() == "browser"
+        choice = self.var_backend.get()
+        browser = choice == "browser"
+        tradovate = choice == "tradovate"
         self.btn_connect.configure(text="Launch Browser" if browser else "Connect")
+        if tradovate:
+            self.frm_tdv.grid()
+        else:
+            self.frm_tdv.grid_remove()
         if browser:
             self.lbl_backend_hint.configure(
                 text="Browser mode: a real Chrome window opens; you log in, then Arm. TopstepX (projectx) "
                      "ships pre-calibrated.")
+        elif tradovate:
+            self.lbl_backend_hint.configure(
+                text="Tradovate API mode: direct REST + WebSocket connection. DEMO endpoint by default; "
+                     "brackets ride server-side OSO orders.")
         else:
             self.lbl_backend_hint.configure(
                 text="API mode: official TopstepX API (recommended). Needs your API key.")
+        self._update_mode_banner()
 
     def _on_connect(self) -> None:
         s = self._collect_settings()
@@ -912,6 +970,9 @@ class ImbabotGUI:
         s.save()
         if s.backend == "browser":
             self._launch_browser(s)
+            return
+        if s.backend == "tradovate":
+            self._connect_tradovate(s)
             return
         key = self.var_key.get().strip()
         if not key:
@@ -924,11 +985,49 @@ class ImbabotGUI:
         self.btn_connect.configure(state="disabled")
         threading.Thread(target=self._connect_worker, args=(s, key), daemon=True).start()
 
-    def _connect_worker(self, s: Settings, key: str) -> None:
+    def _connect_tradovate(self, s: Settings) -> None:
+        """Tradovate branch of Connect. Secrets: keyring when remembered, else a
+        session-only override on the client — never settings.json or the log."""
+        if not s.tdv_username:
+            messagebox.showerror("Missing username", "Enter your Tradovate username.")
+            return
+        secrets = {k: v for k, v in {
+            "password": self.var_tdv_pass.get().strip(),
+            "cid": self.var_tdv_cid.get().strip(),
+            "sec": self.var_tdv_sec.get().strip(),
+        }.items() if v}
+        stored = load_tradovate_credentials(s.tdv_username) or {}
+        if not (secrets.get("password") or stored.get("password")):
+            messagebox.showerror("Missing password", "Enter your Tradovate password.")
+            return
+        if not ((secrets.get("cid") or stored.get("cid"))
+                and (secrets.get("sec") or stored.get("sec"))):
+            messagebox.showerror(
+                "Missing API key",
+                "Enter the API key cid + secret (Tradovate → API Access).")
+            return
+        session_secrets = None
+        if self.var_remember.get() and secrets:
+            blob = dict(stored)
+            blob.update(secrets)
+            blob["app_id"] = s.tdv_app_id or "Imbabot"
+            backend = store_tradovate_credentials(s.tdv_username, blob)
+            self.log(f"Tradovate credentials stored via {backend}.")
+        elif secrets:
+            session_secrets = secrets
+        self.lbl_conn.configure(text="connecting…")
+        self.btn_connect.configure(state="disabled")
+        threading.Thread(target=self._connect_worker,
+                         args=(s, secrets.get("password", ""), session_secrets),
+                         daemon=True).start()
+
+    def _connect_worker(self, s: Settings, key: str, session_secrets=None) -> None:
         try:
             from .engine import BotEngine
 
             engine = BotEngine(s, log=self.log)
+            if session_secrets:
+                engine.client.session_secrets = session_secrets
             engine.connect(key)
             accounts = engine.list_accounts()
             self.events.put(("connected", engine, accounts))

@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 let API = null;          // window.pywebview.api once ready
 let logCursor = 0;
 let backend = "api";     // segmented control state
+let tdvEnv = "demo";     // Tradovate environment segment state
 
 /* ---------------------------------------------------------------- helpers */
 function setChg(prefix, chg, pct, invert = false) {
@@ -54,6 +55,8 @@ function collectSettings() {
     entry_limit_offset_ticks: parseInt($("f-limitoff").value, 10),
     use_live_data: $("f-livedata").checked,
     dry_run: $("f-dry").checked,
+    tdv_environment: tdvEnv,
+    tdv_username: $("f-tdv-user").value.trim(),
   };
 }
 
@@ -72,12 +75,33 @@ document.querySelectorAll(".tab").forEach((tab) => {
 });
 
 /* backend segmented control */
+function refreshBackendUI() {
+  $("btn-connect").textContent = backend === "browser" ? "Launch Browser" : "Connect";
+  $("fields-api").hidden = backend === "tradovate";
+  $("fields-tdv").hidden = backend !== "tradovate";
+}
 document.querySelectorAll("#seg-backend button").forEach((b) => {
   b.addEventListener("click", () => {
     document.querySelectorAll("#seg-backend button").forEach((x) => x.classList.remove("active"));
     b.classList.add("active");
     backend = b.dataset.val;
-    $("btn-connect").textContent = backend === "browser" ? "Launch Browser" : "Connect";
+    refreshBackendUI();
+  });
+});
+
+/* Tradovate environment segment (live is source-gated; the backend refuses it
+   until safety.py LIVE_TRADING is flipped — surfaced here as a warning) */
+document.querySelectorAll("#seg-tdvenv button").forEach((b) => {
+  b.addEventListener("click", () => {
+    if (b.dataset.val === "live" &&
+        !confirm("LIVE Tradovate endpoint?\n\nThis build ships with LIVE_TRADING " +
+                 "disabled in safety.py, so connecting will be refused until you " +
+                 "deliberately enable it in source AFTER the demo check passes.\n\nSelect live anyway?")) {
+      return;
+    }
+    document.querySelectorAll("#seg-tdvenv button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    tdvEnv = b.dataset.val;
   });
 });
 
@@ -105,11 +129,26 @@ async function withApi(fn) {
 $("btn-connect").addEventListener("click", () => withApi(async () => {
   $("conn-status").textContent = backend === "browser" ? "launching browser…" : "connecting…";
   $("btn-connect").disabled = true;
-  const r = await API.connect(collectSettings(), $("f-key").value, $("f-remember").checked);
+  const payload = collectSettings();
+  if (backend === "tradovate") {
+    // Secrets ride a dedicated key the bridge strips BEFORE settings handling.
+    payload.tdv_secrets = {
+      password: $("f-tdv-pass").value,
+      cid: $("f-tdv-cid").value.trim(),
+      sec: $("f-tdv-sec").value,
+    };
+  }
+  const r = await API.connect(payload, backend === "tradovate" ? "" : $("f-key").value,
+                              $("f-remember").checked);
   $("btn-connect").disabled = false;
   if (!r.ok) { $("conn-status").textContent = "connect failed"; alert(r.error); return; }
-  $("f-key").value = "";                       // never keep the key in the DOM
+  $("f-key").value = "";                       // never keep secrets in the DOM
   $("f-key").placeholder = "stored on this device";
+  $("f-tdv-pass").value = ""; $("f-tdv-sec").value = ""; $("f-tdv-cid").value = "";
+  if (r.env && $("f-remember").checked) {
+    $("f-tdv-pass").placeholder = "stored on this device";
+    $("f-tdv-sec").placeholder = "stored on this device";
+  }
   if (r.browser) { $("conn-status").textContent = "browser launching — log in, then Arm"; return; }
   $("conn-status").textContent = "connected";
   $("conn-status").className = "up";
@@ -277,6 +316,15 @@ function applyState(st) {
 
   setPill("pill-conn", st.connected ? "ok" : "", st.connected ? "CONNECTED" : "OFFLINE",
           st.connected ? "green" : "gray");
+  const venue = $("pill-venue");
+  if (st.backend === "tradovate") {
+    venue.hidden = false;
+    setPill("pill-venue", st.tdv_env === "live" ? "bad" : "ok",
+            st.tdv_env === "live" ? "TDV LIVE" : "TDV DEMO",
+            st.tdv_env === "live" ? "red" : "green");
+  } else {
+    venue.hidden = true;
+  }
   setPill("pill-live", st.dry_run ? "ok" : "bad", st.dry_run ? "DRY-RUN" : "LIVE",
           st.dry_run ? "green" : "red pulse");
   setPill("pill-armed", st.armed ? "warn" : "", st.armed ? "ARMED" : "DISARMED",
@@ -334,10 +382,18 @@ async function init() {
   $("f-livedata").checked = s.use_live_data;
   $("f-test-mode").checked = s.test_mode;
   $("f-test-time").value = s.test_fire_time;
+  $("f-tdv-user").value = s.tdv_username || "";
+  tdvEnv = s.tdv_environment || "demo";
+  document.querySelectorAll("#seg-tdvenv button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.val === tdvEnv));
+  if (s.has_tdv_credentials) {
+    $("f-tdv-pass").placeholder = "stored on this device";
+    $("f-tdv-sec").placeholder = "stored on this device";
+  }
   backend = s.backend || "api";
   document.querySelectorAll("#seg-backend button").forEach((b) =>
     b.classList.toggle("active", b.dataset.val === backend));
-  $("btn-connect").textContent = backend === "browser" ? "Launch Browser" : "Connect";
+  refreshBackendUI();
   poll();
 }
 

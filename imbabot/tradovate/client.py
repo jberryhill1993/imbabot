@@ -114,6 +114,9 @@ class TradovateClient:
         self._user_ws = None    # tradovate.ws.TdvSocket (user sync)
         self._md_ws = None      # tradovate.ws.TdvSocket (market data)
         self._kill_reason: Optional[str] = None    # daily-loss kill switch (ws.py sets)
+        # Transient credentials for THIS session only (UI passes cid/sec here when
+        # the user declines "remember" — nothing touches the keyring/disk).
+        self.session_secrets: Dict[str, Any] = {}
 
     # ------------------------------------------------------------ plumbing
     def _base_url(self) -> str:
@@ -191,7 +194,8 @@ class TradovateClient:
         username = username or getattr(self._settings, "tdv_username", "")
         if not username:
             raise TradovateError("Tradovate username is required.")
-        blob = load_tradovate_credentials(username) or {}
+        blob = dict(load_tradovate_credentials(username) or {})
+        blob.update({k: v for k, v in self.session_secrets.items() if v})
         password = api_key or blob.get("password") or ""
         if not password:
             raise TradovateError(

@@ -34,6 +34,7 @@
     <span class="pill" id="pill-conn"><span class="dot gray"></span><span id="pill-conn-txt">OFFLINE</span></span>
     <span class="pill" id="pill-live"><span class="dot gray" id="pill-live-dot"></span><span id="pill-live-txt">DRY-RUN</span></span>
     <span class="pill" id="pill-armed"><span class="dot gray" id="pill-armed-dot"></span><span id="pill-armed-txt">DISARMED</span></span>
+    <span class="pill" id="pill-venue" hidden><span class="dot gray" id="pill-venue-dot"></span><span id="pill-venue-txt">TDV DEMO</span></span>
   </header>
 
   <!-- ═══════════ Row 2 · hero stat cards ═══════════ -->
@@ -93,16 +94,35 @@
           <div class="field"><label>Backend</label>
             <div class="segment" id="seg-backend">
               <button data-val="api" class="active">API (TopstepX)</button>
+              <button data-val="tradovate">Tradovate</button>
               <button data-val="browser">Browser</button>
             </div>
           </div>
-          <div class="field"><label>Platform</label>
-            <select id="f-platform"><option>projectx</option><option>tradesea</option></select>
+          <div id="fields-api">
+            <div class="field"><label>Platform</label>
+              <select id="f-platform"><option>projectx</option><option>tradesea</option></select>
+            </div>
+            <div class="field"><label>Base URL</label><input type="text" id="f-base"></div>
+            <div class="field"><label>Username</label><input type="text" id="f-user"></div>
+            <div class="field"><label>API key</label><input type="password" id="f-key" autocomplete="off"
+                 placeholder="stored on this device"></div>
           </div>
-          <div class="field"><label>Base URL</label><input type="text" id="f-base"></div>
-          <div class="field"><label>Username</label><input type="text" id="f-user"></div>
-          <div class="field"><label>API key</label><input type="password" id="f-key" autocomplete="off"
-               placeholder="stored on this device"></div>
+          <div id="fields-tdv" hidden>
+            <div class="field"><label>Environment</label>
+              <div class="segment" id="seg-tdvenv">
+                <button data-val="demo" class="active">Demo</button>
+                <button data-val="live" title="Live is locked until safety.py LIVE_TRADING is enabled">Live 🔒</button>
+              </div>
+            </div>
+            <div class="field"><label>Tradovate username</label><input type="text" id="f-tdv-user" autocomplete="off"></div>
+            <div class="field"><label>Password</label><input type="password" id="f-tdv-pass" autocomplete="off"
+                 placeholder="enter your password"></div>
+            <div class="field"><label>API key cid</label><input type="text" class="short" id="f-tdv-cid" autocomplete="off"></div>
+            <div class="field"><label>API key secret</label><input type="password" id="f-tdv-sec" autocomplete="off"
+                 placeholder="enter the API secret"></div>
+            <div class="mp-meta">Needs the Tradovate <b>API Access</b> add-on (cid + secret) and a CME
+              market-data subscription for API usage. Demo endpoint by default.</div>
+          </div>
           <div class="toggle-row"><span>Remember on this device</span>
             <label class="switch"><input type="checkbox" id="f-remember" checked><span class="slider"></span></label>
           </div>
