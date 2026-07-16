@@ -1056,5 +1056,81 @@ def run_selftest() -> int:
     except tdv_safety.SafetyError as exc:
         _check("tdv kill switch blocks new orders", "Kill switch" in str(exc))
 
+    # 13h) engine E2E on the Tradovate translation layer (FakeTradovate):
+    # full fire -> OCO cancel -> panic, exercising signed netPos + OSO shapes.
+    from ._fake_tradovate import FakeTradovate
+    _check("FakeTradovate conforms to BrokerAdapter",
+           isinstance(FakeTradovate(), BrokerAdapter))
+
+    def make_tdv_engine(**overrides):
+        s = Settings(backend="tradovate", tdv_username="tester",
+                     contract_symbol="MNQ", entry_points=12, stop_loss_points=12,
+                     take_profit_points=13.3, contracts=1,
+                     bot_stop_loss=True, bot_take_profit=True,
+                     max_trades_per_day=99, max_contracts=5)
+        for k, v in overrides.items():
+            setattr(s, k, v)
+        ft = FakeTradovate(last=21000.0)
+        e = BotEngine(s, client=ft, log=lambda *a, **k: None)
+        e.connect("")
+        return e, ft
+
+    # dry-run gate covers the tradovate path (fires BEFORE any order call)
+    eng, ft = make_tdv_engine(dry_run=True, trade_mode="one_trade")
+    eng._on_fire()
+    _check("tdv dry-run captured a plan, placed 0 orders",
+           eng.last_plan is not None and len(ft.placed) == 0,
+           f"placed {len(ft.placed)}")
+
+    # live one-trade: 2 OSO entries with absolute bracket prices
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    _check("tdv E2E: 2 OSO legs placed", len(ft.placed) == 2, f"{len(ft.placed)}")
+    buy = next(o for o in ft.placed if o["side"] == OrderSide.BUY)
+    sell = next(o for o in ft.placed if o["side"] == OrderSide.SELL)
+    _check("tdv E2E: BUY leg brackets absolute + correctly ordered",
+           buy["bracket1"]["stopPrice"] < buy["stopPrice"] < buy["bracket2"]["price"],
+           f"got {buy['bracket1']}/{buy['stopPrice']}/{buy['bracket2']}")
+    _check("tdv E2E: SELL leg brackets mirrored",
+           sell["bracket2"]["price"] < sell["stopPrice"] < sell["bracket1"]["stopPrice"],
+           f"got {sell['bracket2']}/{sell['stopPrice']}/{sell['bracket1']}")
+    _check("tdv E2E: every order isAutomated",
+           all(o.get("isAutomated") for o in ft.placed))
+
+    # long fill (SIGNED netPos, no type key) -> OCO cancels the short entry
+    long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
+    ft.simulate_fill(eng.contract.id, +1)
+    eng._monitor_oco(plan, poll_seconds=0.01)
+    _check("tdv E2E: long fill cancels the short entry",
+           short_oid in ft.cancelled and long_oid not in ft.cancelled,
+           f"cancelled={ft.cancelled}")
+
+    # mirror: short fill cancels the long entry
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
+    ft.simulate_fill(eng.contract.id, -1)
+    eng._monitor_oco(plan, poll_seconds=0.01)
+    _check("tdv E2E: short fill cancels the long entry",
+           long_oid in ft.cancelled and short_oid not in ft.cancelled,
+           f"cancelled={ft.cancelled}")
+
+    # emergency stop: cancel sweep + flatten via opposing market on signed netPos
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    ft.simulate_fill(eng.contract.id, +1)   # long 1, short entry still resting
+    n_orders = len(ft.placed)
+    eng.emergency_stop()
+    _check("tdv E2E: panic cancels the resting entry", len(ft.cancelled) >= 1,
+           f"cancelled={ft.cancelled}")
+    flat = ft.placed[n_orders:]
+    _check("tdv E2E: panic flattens long 1 with a market SELL 1",
+           len(flat) == 1 and flat[0]["side"] == OrderSide.SELL
+           and flat[0]["size"] == 1
+           and flat[0]["order_type"] == OrderType.MARKET, f"got {flat}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
