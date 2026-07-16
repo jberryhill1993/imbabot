@@ -2,6 +2,7 @@
 requests>=2.31
 keyring>=24.0        # OS keychain for the API key; falls back to a 0600 file
 tzdata>=2024.1       # IANA timezone DB (needed for zoneinfo on Windows)
+pywebview>=5.0       # glass web UI (WebView2/EdgeChromium on Windows); --classic uses Tkinter
 
 # Browser-automation backend (drives your installed Google Chrome).
 # selenium bundles into the .exe/.app and is the default browser driver; it uses

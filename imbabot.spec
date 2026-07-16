@@ -45,6 +45,18 @@ hiddenimports += ["imbabot.gui", "imbabot.engine", "imbabot.projectx", "imbabot.
 # them so the (calibrated) packs ship inside the .exe/.app for downloaders.
 datas += [("imbabot/browser/selectors", "imbabot/browser/selectors")]
 
+# Analyzer data (economic-event calendar) — bundled so calendar.py resolves it under
+# sys._MEIPASS in the frozen app (0.2.1+ Morning Plan).
+datas += [("imbabot/analysis/data", "imbabot/analysis/data")]
+
+# Glass web UI (0.2.3): static assets + pywebview (WebView2 renderer on Windows).
+datas += [("imbabot/webui/static", "imbabot/webui/static")]
+if importlib.util.find_spec("webview") is not None:
+    d, b, h = collect_all("webview")
+    datas += d
+    binaries += b
+    hiddenimports += h
+
 _is_mac = sys.platform == "darwin"
 # Platform-correct icon format: macOS EXE/.app uses .icns, Windows .exe uses .ico.
 if _is_mac:

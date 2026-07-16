@@ -275,6 +275,130 @@ def cmd_browser_calibrate(args: argparse.Namespace) -> int:
     return run_calibration(args.platform, url_override=args.url or "")
 
 
+def cmd_probe_history(args: argparse.Namespace) -> int:
+    """Phase 0: measure how far back TopStep serves 1-minute bars for the symbol."""
+    log = _logger()
+    engine = _connected_engine(log)
+    if not engine:
+        return 1
+    contract = engine.contract or engine.refresh_contract()
+    if not contract:
+        print("Could not resolve a contract. Check contract_symbol in config.")
+        return 1
+    from .analysis import probe_depth
+
+    use_live = bool(args.live) or engine.settings.use_live_data
+    feed = "LIVE" if use_live else "sim"
+    print(f"Probing 1-minute history depth for {contract.name} ({contract.id}) "
+          f"on the {feed} feed …\n")
+    result = probe_depth(engine.client, contract.id, live=use_live)
+    print(result.summary())
+    return 0
+
+
+def cmd_ingest_history(args: argparse.Namespace) -> int:
+    """Ingest a 1-minute (FirstRate) or 1-second (Databento) CSV into cached DayRecords."""
+    from pathlib import Path
+
+    if not Path(args.csv).exists():
+        print(f"File not found: {args.csv}")
+        return 1
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.csv_history import history_path
+
+    print(f"Ingesting {args.csv} as {symbol} ({args.format}) …")
+    if args.format == "databento":
+        from .analysis.databento_csv import ingest_databento_stream
+        records = ingest_databento_stream(args.csv, symbol, open_minutes=args.open_minutes)
+    else:
+        from .analysis.csv_history import ingest_csv
+        records = ingest_csv(args.csv, symbol, open_minutes=args.open_minutes)
+    if not records:
+        print("No trading days with a 09:30 ET open were found. Check the file/timezone.")
+        return 1
+    print(f"Ingested {len(records)} trading days "
+          f"({records[0].date} -> {records[-1].date}).")
+    print(f"Cached to {history_path(symbol)}")
+    return 0
+
+
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    """Backtest cached history and fit the recommended-spread model."""
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.backtest import BracketSpec
+    from .analysis.runner import calibrate
+
+    bracket = BracketSpec(stop_points=args.stop or s.stop_loss_points,
+                          target_points=args.target or s.take_profit_points)
+    try:
+        res = calibrate(symbol, bracket=bracket, refresh_daily=not args.offline)
+    except Exception as exc:
+        print(f"Calibration failed: {exc}")
+        return 1
+    print(res.summary)
+    return 0
+
+
+def cmd_recommend(args: argparse.Namespace) -> int:
+    """Produce today's recommended spread from pre-open inputs (writes a report)."""
+    s = Settings.load()
+    symbol = args.symbol or s.contract_symbol
+    from .analysis.runner import run_daily
+
+    try:
+        res = run_daily(symbol, overnight_range=args.overnight_range,
+                        current_price=args.price, current_spread=s.entry_points,
+                        date=args.date)
+    except Exception as exc:
+        print(f"Recommendation failed: {exc}")
+        return 1
+    print(res.report_text)
+    print(f"\nReport written to {res.report_path}")
+    return 0
+
+
+def cmd_analyze_ticks(args: argparse.Namespace) -> int:
+    """Tick-data Morning analysis: ingest, (re)fit the spike predictor, walk-forward, report."""
+    from .analysis.tick_runner import morning_plan
+    if args.source:
+        from .analysis.tick_data import ingest_tbbo_zip
+        try:
+            days = ingest_tbbo_zip(args.source)
+            print(f"Ingested {len(days)} tick day(s).")
+        except Exception as exc:
+            print(f"Ingest failed: {exc}")
+            return 1
+    if args.fit:
+        from .analysis.tick_dataset import build_dataset
+        from .analysis.spike_model import SpikeModel, save_spike_model
+        from .analysis.walkforward import evaluate
+        rows = build_dataset()
+        if not rows:
+            print("No cached tick days. Pass a tbbo zip to ingest first.")
+            return 1
+        save_spike_model(SpikeModel().fit(rows))
+        print(f"Fitted spike predictor on {len(rows)} days; model saved.\n")
+        print(evaluate(rows, warm=60, k=25, spike_min=20).text)
+    if args.target:
+        from datetime import datetime
+        from .analysis.tick_data import cached_dates
+        cd = cached_dates()
+        date = args.date or (cd[-1] if cd else datetime.now().astimezone().date().isoformat())
+        mp = morning_plan(date, target_dollars=args.target, max_contracts=args.max_contracts)
+        p = mp.plan
+        sz = (f"{p.contracts} contract(s) +/-{p.entry_spread:.0f}, TP {p.tp_distance_points:.0f}pt "
+              f"= ${p.achievable_dollars:,.0f}, SL ${p.sl_bracket_dollars:,.0f}" if p.feasible else "—")
+        print(f"\nMorning Plan {date} (TP ${args.target:,.0f}):")
+        print(f"  {mp.decision} / {mp.conviction}   ·   Volatility {mp.volatility}   ·   "
+              f"predicted spike ~{mp.predicted_spike:.0f}pt   ·   P(30+)={mp.p_big*100:.0f}%")
+        print(f"  News: {mp.news_label}")
+        print(f"  Size: {sz}")
+        print(f"  {mp.rationale}")
+    return 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     from .selftest import run_selftest
 
@@ -326,12 +450,52 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--url", help="override the URL to open")
     sp.set_defaults(func=cmd_browser_calibrate)
 
+    sp = sub.add_parser("probe-history", help="measure how far back 1-min bars are available")
+    sp.add_argument("--live", action="store_true", help="probe the LIVE data feed (not sim)")
+    sp.set_defaults(func=cmd_probe_history)
+
+    sp = sub.add_parser("ingest-history", help="ingest a 1-min (FirstRate) or 1-sec (Databento) CSV")
+    sp.add_argument("csv", help="path to the historical bars CSV")
+    sp.add_argument("--symbol", help="symbol label for the cache (default: contract_symbol)")
+    sp.add_argument("--format", choices=["firstrate", "databento"], default="firstrate",
+                    help="CSV format (firstrate=1-min, databento=1-sec ohlcv)")
+    sp.add_argument("--open-minutes", type=int, default=15,
+                    help="minutes after the open to keep per day (default 15)")
+    sp.set_defaults(func=cmd_ingest_history)
+
+    sp = sub.add_parser("calibrate", help="backtest cached history + fit the spread model")
+    sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
+    sp.add_argument("--stop", type=float, help="bracket stop points (default: stop_loss_points)")
+    sp.add_argument("--target", type=float, help="bracket target points (default: take_profit_points)")
+    sp.add_argument("--offline", action="store_true", help="use cached daily data (no Yahoo fetch)")
+    sp.set_defaults(func=cmd_calibrate)
+
+    sp = sub.add_parser("recommend", help="today's recommended spread from pre-open inputs")
+    sp.add_argument("--symbol", help="symbol label (default: contract_symbol)")
+    sp.add_argument("--overnight-range", type=float, help="Globex overnight range (points)")
+    sp.add_argument("--price", type=float, help="pre-open price (for the gap estimate)")
+    sp.add_argument("--date", help="ISO date override (default: today)")
+    sp.set_defaults(func=cmd_recommend)
+
+    sp = sub.add_parser("analyze-ticks", help="tick-data Morning analysis + fit/walk-forward")
+    sp.add_argument("source", nargs="?", help="Databento tbbo zip to ingest (default: cached ticks)")
+    sp.add_argument("--fit", action="store_true", help="(re)fit the spike predictor + walk-forward")
+    sp.add_argument("--target", type=float, help="profit target $ for the Morning Plan output")
+    sp.add_argument("--date", help="date for the Morning Plan (default: latest cached)")
+    sp.add_argument("--max-contracts", type=int, default=10, help="contract cap (default 10)")
+    sp.set_defaults(func=cmd_analyze_ticks)
+
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)
     return p
 
 
 def main(argv: Optional[list] = None) -> int:
+    # Windows consoles default to cp1252, which can't encode some report glyphs.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

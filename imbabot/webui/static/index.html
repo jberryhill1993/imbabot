@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Imbabot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+
+  <!-- ═══════════ Row 1 · top bar ═══════════ -->
+  <header class="card topbar">
+    <div class="brand">
+      <span class="name">◆ IMBABOT</span>
+      <span class="ver" id="ver">· TopstepX opening-range bot</span>
+    </div>
+    <div class="tick">
+      <span class="sym" id="nq-sym">NQ</span>
+      <span class="px num" id="nq-px">—</span>
+      <span class="chg flat num" id="nq-chg">
+        <span class="chg-pts" id="nq-chg-pts">connecting…</span>
+        <span class="chg-pct" id="nq-chg-pct"></span>
+      </span>
+    </div>
+    <div class="tick">
+      <span class="sym">VIX</span>
+      <span class="px num" id="vix-px">—</span>
+      <span class="chg flat num" id="vix-chg">
+        <span class="chg-pts" id="vix-chg-pts"></span>
+        <span class="chg-pct" id="vix-chg-pct"></span>
+      </span>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="pill-conn"><span class="dot gray"></span><span id="pill-conn-txt">OFFLINE</span></span>
+    <span class="pill" id="pill-live"><span class="dot gray" id="pill-live-dot"></span><span id="pill-live-txt">DRY-RUN</span></span>
+    <span class="pill" id="pill-armed"><span class="dot gray" id="pill-armed-dot"></span><span id="pill-armed-txt">DISARMED</span></span>
+  </header>
+
+  <!-- ═══════════ Row 2 · hero stat cards ═══════════ -->
+  <section class="stats">
+    <div class="card stat stat-jarvis">
+      <div class="section-label">T-minus to market open</div>
+      <div class="jarvis">
+        <svg class="ring" viewBox="0 0 72 72" width="64" height="64" aria-hidden="true">
+          <circle class="ring-base" cx="36" cy="36" r="30"/>
+          <circle class="ring-spin" cx="36" cy="36" r="30"/>
+          <circle class="ring-spin2" cx="36" cy="36" r="24"/>
+          <circle class="ring-sweep" cx="36" cy="36" r="30" id="ring-sweep"/>
+          <circle class="ring-core" cx="36" cy="36" r="4"/>
+        </svg>
+        <div class="value hero num" id="stat-tminus">—</div>
+      </div>
+    </div>
+    <div class="card stat">
+      <div class="section-label">Next fire</div>
+      <div class="value num" id="stat-fire">—</div>
+      <div class="sub" id="stat-fire-sub">daily · Mon–Fri · holidays skipped</div>
+    </div>
+    <div class="card stat">
+      <div class="section-label">Last price</div>
+      <div class="value num" id="stat-price">—</div>
+    </div>
+    <div class="card stat">
+      <div class="section-label">Overnight range</div>
+      <div class="value num" id="stat-range">—</div>
+    </div>
+  </section>
+
+  <!-- ═══════════ Row 3 · action bar ═══════════ -->
+  <section class="card actions">
+    <button class="btn-arm" id="btn-arm">ARM</button>
+    <span class="mode-note" id="mode-note">● DRY-RUN — no orders sent</span>
+    <div class="spacer"></div>
+    <button class="btn-flatten" id="btn-flatten">▽ FLATTEN</button>
+    <button class="btn-stop" id="btn-stop">■ EMERGENCY STOP</button>
+  </section>
+
+  <!-- ═══════════ Middle region: tabs card + Morning Plan (the ONLY internal scroller) ═══════════ -->
+  <main class="middle">
+
+  <!-- ═══════════ Row 4 · tabbed main card ═══════════ -->
+  <section class="card">
+    <div class="tabbar">
+      <button class="tab active" data-tab="connect">Connect</button>
+      <button class="tab" data-tab="strategy">Strategy</button>
+      <button class="tab" data-tab="test">Test</button>
+    </div>
+
+    <!-- ── Connect ── -->
+    <div class="tabpane active" id="pane-connect">
+      <div class="grid2">
+        <div>
+          <div class="field"><label>Backend</label>
+            <div class="segment" id="seg-backend">
+              <button data-val="api" class="active">API (TopstepX)</button>
+              <button data-val="browser">Browser</button>
+            </div>
+          </div>
+          <div class="field"><label>Platform</label>
+            <select id="f-platform"><option>projectx</option><option>tradesea</option></select>
+          </div>
+          <div class="field"><label>Base URL</label><input type="text" id="f-base"></div>
+          <div class="field"><label>Username</label><input type="text" id="f-user"></div>
+          <div class="field"><label>API key</label><input type="password" id="f-key" autocomplete="off"
+               placeholder="stored on this device"></div>
+          <div class="toggle-row"><span>Remember on this device</span>
+            <label class="switch"><input type="checkbox" id="f-remember" checked><span class="slider"></span></label>
+          </div>
+        </div>
+        <div>
+          <div class="field"><label>Account</label>
+            <select id="f-account"><option value="">— connect first —</option></select>
+          </div>
+          <div class="field"><label>Symbol</label><input type="text" class="short" id="f-symbol"></div>
+          <div style="margin-top:14px">
+            <button class="btn-primary" id="btn-connect">Connect</button>
+            <span style="margin-left:12px;font-size:12px" class="flat" id="conn-status">not connected</span>
+          </div>
+          <div class="mp-meta" id="contract-info"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Strategy ── -->
+    <div class="tabpane" id="pane-strategy">
+      <div class="grid2">
+        <div>
+          <div class="field"><label>Entry points (±)</label><input type="number" class="short" id="f-entry" step="0.25"></div>
+          <div class="field"><label>Stop-loss points <span class="hint">(bot-managed)</span></label>
+            <span style="display:flex;align-items:center;gap:10px">
+              <label class="switch"><input type="checkbox" id="f-botsl"><span class="slider"></span></label>
+              <input type="number" class="short" id="f-sl" step="0.25">
+            </span>
+          </div>
+          <div class="field"><label>Take-profit points <span class="hint">(bot-managed)</span></label>
+            <span style="display:flex;align-items:center;gap:10px">
+              <label class="switch"><input type="checkbox" id="f-bottp"><span class="slider"></span></label>
+              <input type="number" class="short" id="f-tp" step="0.25">
+            </span>
+          </div>
+          <div class="field"><label>Contracts</label><input type="number" class="short" id="f-contracts" step="1"></div>
+          <div class="field"><label>Fire daily at (HH:MM:SS)</label><input type="text" class="short" id="f-daily-time"></div>
+          <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn-primary" id="btn-save">Save settings</button>
+            <button class="btn-ghost" id="btn-daily">💾 Save &amp; arm daily (Mon–Fri)</button>
+          </div>
+        </div>
+        <div>
+          <div class="section-label" style="margin-bottom:8px">Mode</div>
+          <div class="toggle-row"><span>One-Trade (auto OCO)<span class="hint">first fill cancels the other leg</span></span>
+            <label class="switch"><input type="checkbox" id="f-oco"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row"><span>DRY-RUN (no real orders)<span class="hint">compute &amp; log only</span></span>
+            <label class="switch"><input type="checkbox" id="f-dry"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row"><span>Stop-limit entries (cap slippage)<span class="hint">limit offset, ticks:</span></span>
+            <span style="display:flex;align-items:center;gap:10px">
+              <label class="switch"><input type="checkbox" id="f-stoplimit"><span class="slider"></span></label>
+              <input type="number" class="short" id="f-limitoff" style="width:70px" step="1">
+            </span>
+          </div>
+          <div class="toggle-row"><span>Use LIVE market data feed<span class="hint">off = sim data subscription</span></span>
+            <label class="switch"><input type="checkbox" id="f-livedata"><span class="slider"></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Test ── -->
+    <div class="tabpane" id="pane-test">
+      <div class="field" style="max-width:560px"><label>Test mode: fire at a custom time (instead of 9:30)</label>
+        <label class="switch"><input type="checkbox" id="f-test-mode"><span class="slider"></span></label>
+      </div>
+      <div class="field" style="max-width:560px"><label>Fire at (HH:MM:SS, 24-hour) — your computer's clock</label>
+        <input type="text" class="short" id="f-test-time">
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-flatten" id="btn-fire-now">⚡ Fire TEST now</button>
+        <button class="btn-ghost" id="btn-autofire">💾 Save &amp; schedule auto-fire</button>
+      </div>
+      <p class="mp-meta" style="max-width:640px">Use a SIM / practice account. The bot fires off your computer's
+        clock in 24-hour format (7:50 PM = 19:50). Enter a time, click Save &amp; schedule, and it auto-fires
+        then; or click 'Fire TEST now'. DISARM cancels. Honors dry-run.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════ Row 5 · Morning Plan ═══════════ -->
+  <section class="card">
+    <div class="card-title"><span class="dot green"></span>Morning Plan
+      <span style="font-size:11px;color:var(--text-muted);font-weight:400">— tick-data · advisory; the bot never changes your settings</span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn-primary" id="btn-recalc">↻ Recalculate now</button>
+    </div>
+
+    <div class="mp-summary num" id="mp-status">Enter a profit-target $, then Recalculate.</div>
+
+    <div class="field" style="max-width:520px;margin-top:8px">
+      <label>Profit target $ <span class="hint">(drives the TopStep inputs below on Recalculate; capped at 5 contracts)</span></label>
+      <input type="number" class="short" id="f-mp-target" value="800">
+    </div>
+
+    <div class="mp-headline" id="mp-headline" style="margin-top:10px;display:none">➡ ENTER IN TOPSTEP</div>
+    <div class="mp-cells" id="mp-cells" style="display:none">
+      <div class="tile"><div class="section-label">Contracts</div><div class="value num" id="mp-ct">—</div></div>
+      <div class="tile"><div class="section-label">Entry (pts)</div><div class="value num" id="mp-entry">—</div></div>
+      <div class="tile green"><div class="section-label">Take-Profit</div><div class="value num" id="mp-tp">—</div></div>
+      <div class="tile red"><div class="section-label">Stop-Loss</div><div class="value num" id="mp-sl">—</div></div>
+    </div>
+
+    <div class="mp-alert" id="mp-alert" style="display:none"></div>
+    <div class="mp-meta" id="mp-sizing"></div>
+    <div class="mp-meta" id="mp-detail"></div>
+  </section>
+
+  </main><!-- /middle -->
+
+  <!-- ═══════════ Bottom · activity log (pinned) ═══════════ -->
+  <section class="card log-card" id="log-card">
+    <div class="log-head" id="log-head">
+      <span class="chev">▶</span>
+      <span class="card-title" style="margin:0"><span class="dot gray"></span>Activity log</span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn-ghost" id="btn-savelog">Save log…</button>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </section>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

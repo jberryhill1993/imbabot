@@ -1,0 +1,19 @@
+{
+  "_comment": "US macro events with impact levels for the Morning Plan. NFP (first Friday 08:30, HIGH) and jobless claims (Thursday 08:30, LOW) are DERIVED in calendar.py. FOMC dates below are exact. CPI / Core PCE / PPI / Retail / GDP / ISM date lists are user-fillable from forexfactory.com or BLS/BEA/FRB schedules (paste ISO YYYY-MM-DD into 'dates'); impact defaults live in calendar.py _CURATED. Times are ET.",
+  "fomc": {
+    "time_et": "14:00",
+    "impact": "high",
+    "dates": [
+      "2025-06-18", "2025-07-30", "2025-09-17", "2025-10-29", "2025-12-10",
+      "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29",
+      "2026-09-16", "2026-10-28", "2026-12-09"
+    ]
+  },
+  "cpi":    { "time_et": "08:30", "impact": "high",   "dates": [] },
+  "pce":    { "time_et": "08:30", "impact": "high",   "dates": [] },
+  "ppi":    { "time_et": "08:30", "impact": "medium", "dates": [] },
+  "retail": { "time_et": "08:30", "impact": "medium", "dates": [] },
+  "gdp":    { "time_et": "08:30", "impact": "medium", "dates": [] },
+  "ism_mfg": { "time_et": "10:00", "impact": "medium", "dates": [] },
+  "ism_svc": { "time_et": "10:00", "impact": "medium", "dates": [] }
+}

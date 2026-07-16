@@ -31,25 +31,34 @@ from .config import Settings, load_api_key, store_api_key, log_path
 from .logbus import Logger
 from .models import Account
 
-# ---- palette (arc-reactor / Jarvis HUD: cyan glow on near-black) ----
-BG = "#03070d"
-SURFACE = "#06121b"
-CARD = "#081a26"
-ELEV = "#0c2735"
-BORDER = "#0f3c4d"
-FG = "#bfeffb"
-MUTED = "#3f8197"
-ACCENT = "#00e5ff"
-ACCENT_H = "#62f1ff"
-GREEN = "#00e6a0"
-GREEN_H = "#43ffc4"
-RED = "#ff3b54"
-RED_H = "#ff6f82"
-AMBER = "#ffb02e"
-AMBER_H = "#ffc861"
-# extra HUD tones
-GLOW = "#0a6f86"     # dim cyan for glow underlays
-GRID = "#0a2330"     # faint grid / backdrop lines
+# ---- palette (modern fintech dashboard: soft navy cards, mint/coral semantics) ----
+# (previous arc-reactor palette, for rollback: BG #03070d SURFACE #06121b CARD #081a26
+#  ELEV #0c2735 BORDER #0f3c4d FG #bfeffb MUTED #3f8197 ACCENT #00e5ff/#62f1ff
+#  GREEN #00e6a0/#43ffc4 RED #ff3b54/#ff6f82 AMBER #ffb02e/#ffc861 GLOW #0a6f86 GRID #0a2330)
+BG = "#0B1120"        # page: very dark desaturated navy
+SURFACE = "#131B2E"   # panel
+CARD = "#16203A"      # card
+ELEV = "#1B2742"      # elevated chip / hover
+BORDER = "#26314D"    # 1px low-contrast blue-gray borders
+FG = "#E8EDF5"        # soft white text
+MUTED = "#7D8CA6"     # secondary / labels
+ACCENT = "#38BDF8"    # interactive / info (cyan-blue)
+ACCENT_H = "#6FD0FF"
+GREEN = "#3DDC97"     # bullish / positive / active
+GREEN_H = "#6BEBB4"
+RED = "#F45B69"       # bearish / negative / danger
+RED_H = "#FF7D89"
+AMBER = "#F5B759"     # warning / highlight
+AMBER_H = "#FFD08A"
+# semantic tinted fills (stat cells: green value on faint green field, red on faint red)
+GREEN_TINT = "#12281F"
+GREEN_TINT_BR = "#1F4D38"
+RED_TINT = "#2A1721"
+RED_TINT_BR = "#572733"
+INPUT_BG = "#0E1526"  # input field / log fill (darker than cards)
+# legacy HUD tones (HudHero is dormant; kept so the class still compiles)
+GLOW = "#1B2742"
+GRID = "#141D33"
 
 FONT = "Segoe UI" if sys.platform.startswith("win") else ("Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans")
 MONO = "Consolas" if sys.platform.startswith("win") else ("Menlo" if sys.platform == "darwin" else "DejaVu Sans Mono")
@@ -238,7 +247,8 @@ class ImbabotGUI:
 
         root.title(f"Imbabot {__version__}")
         root.configure(bg=BG)
-        root.minsize(980, 600)
+        root.resizable(True, True)
+        root.minsize(980, 560)
         root.update_idletasks()
         # Initial size; _fit_window() (after widgets build) snaps it to the content
         # so everything shows without maximizing.
@@ -309,33 +319,49 @@ class ImbabotGUI:
         for name, bg in (("TFrame", BG), ("Surface.TFrame", SURFACE), ("Card.TFrame", CARD),
                          ("Header.TFrame", BG)):
             st.configure(name, background=bg)
+        # cards read as panels: subtle 1px border on card + surface frames
+        st.configure("Card.TFrame", bordercolor=BORDER, relief="solid", borderwidth=1)
+        st.configure("Surface.TFrame", bordercolor=BORDER, relief="solid", borderwidth=1)
         st.configure("TLabel", background=BG, foreground=FG, font=(FONT, 11))
         st.configure("Muted.TLabel", background=BG, foreground=MUTED, font=(FONT, 10))
-        st.configure("Brand.TLabel", background=BG, foreground=ACCENT, font=(FONT, 21, "bold"))
+        st.configure("Brand.TLabel", background=BG, foreground=FG, font=(FONT, 19, "bold"))
         st.configure("Sub.TLabel", background=BG, foreground=MUTED, font=(FONT, 10))
         st.configure("H.TLabel", background=BG, foreground=FG, font=(FONT, 11, "bold"))
         st.configure("CardTitle.TLabel", background=CARD, foreground=MUTED, font=(FONT, 9, "bold"))
-        st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(FONT, 18, "bold"))
-        st.configure("CardBig.TLabel", background=CARD, foreground=ACCENT, font=(FONT, 34, "bold"))
-        st.configure("Banner.TLabel", background=BG, foreground=MUTED, font=(FONT, 11, "bold"))
+        st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(MONO, 18, "bold"))
+        st.configure("CardBig.TLabel", background=CARD, foreground=FG, font=(MONO, 30, "bold"))
+        st.configure("Banner.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 11, "bold"))
+        # semantic tinted stat cells (Morning Plan TP/SL): colored value on faint tinted field
+        st.configure("TintGreen.TFrame", background=GREEN_TINT, bordercolor=GREEN_TINT_BR,
+                     relief="solid", borderwidth=1)
+        st.configure("TintRed.TFrame", background=RED_TINT, bordercolor=RED_TINT_BR,
+                     relief="solid", borderwidth=1)
+        st.configure("TintTitleG.TLabel", background=GREEN_TINT, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("TintValG.TLabel", background=GREEN_TINT, foreground=GREEN_H, font=(MONO, 20, "bold"))
+        st.configure("TintTitleR.TLabel", background=RED_TINT, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("TintValR.TLabel", background=RED_TINT, foreground=RED_H, font=(MONO, 20, "bold"))
+        st.configure("CellTitle.TLabel", background=ELEV, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("CellVal.TLabel", background=ELEV, foreground=FG, font=(MONO, 20, "bold"))
+        st.configure("Cell.TFrame", background=ELEV, bordercolor=BORDER, relief="solid", borderwidth=1)
         # header live ticker (NQ)
         st.configure("TickSym.TLabel", background=ELEV, foreground=FG, font=(FONT, 10, "bold"), padding=(9, 4))
         st.configure("TickPrice.TLabel", background=BG, foreground=FG, font=(MONO, 15, "bold"))
         st.configure("TickUp.TLabel", background=BG, foreground=GREEN_H, font=(FONT, 10, "bold"))
         st.configure("TickDown.TLabel", background=BG, foreground=RED_H, font=(FONT, 10, "bold"))
         st.configure("TickFlat.TLabel", background=BG, foreground=MUTED, font=(FONT, 10, "bold"))
-        # pills
-        for nm, bg, fg in (("Pill.Sec.TLabel", ELEV, MUTED), ("Pill.Ok.TLabel", GREEN, "#ffffff"),
-                           ("Pill.Bad.TLabel", RED, "#ffffff"), ("Pill.Warn.TLabel", AMBER, "#0d1117")):
-            st.configure(nm, background=bg, foreground=fg, font=(FONT, 9, "bold"), padding=(11, 5))
+        # pills — softer "status chip" look: tinted fills with colored text (not solid saturated)
+        for nm, bg, fg in (("Pill.Sec.TLabel", ELEV, MUTED), ("Pill.Ok.TLabel", GREEN_TINT, GREEN_H),
+                           ("Pill.Bad.TLabel", RED_TINT, RED_H), ("Pill.Warn.TLabel", AMBER, "#0B1120")):
+            st.configure(nm, background=bg, foreground=fg, font=(FONT, 9, "bold"), padding=(12, 6))
         # inputs
-        st.configure("TEntry", fieldbackground="#06141d", foreground=FG, insertcolor=FG,
-                     bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=6)
-        st.map("TEntry", bordercolor=[("focus", ACCENT)],
+        st.configure("TEntry", fieldbackground=INPUT_BG, foreground=FG, insertcolor=FG,
+                     bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=7)
+        st.map("TEntry", bordercolor=[("focus", ACCENT)], lightcolor=[("focus", ACCENT)],
+               darkcolor=[("focus", ACCENT)],
                foreground=[("disabled", MUTED)], fieldbackground=[("disabled", BG)])
-        st.configure("TCombobox", fieldbackground="#06141d", background=SURFACE, foreground=FG,
-                     arrowcolor=MUTED, bordercolor=BORDER, padding=5)
-        st.map("TCombobox", fieldbackground=[("readonly", "#06141d")], foreground=[("readonly", FG)])
+        st.configure("TCombobox", fieldbackground=INPUT_BG, background=SURFACE, foreground=FG,
+                     arrowcolor=MUTED, bordercolor=BORDER, padding=6)
+        st.map("TCombobox", fieldbackground=[("readonly", INPUT_BG)], foreground=[("readonly", FG)])
         st.configure("TCheckbutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
         st.map("TCheckbutton", background=[("active", BG)], indicatorcolor=[("selected", ACCENT)])
         st.configure("TRadiobutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
@@ -344,24 +370,25 @@ class ImbabotGUI:
         st.configure("TSeparator", background=BORDER)
         st.configure("Vertical.TScrollbar", background=ELEV, troughcolor=BG, bordercolor=BG,
                      arrowcolor=MUTED)
-        # notebook
-        st.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(2, 6, 2, 0))
-        st.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(18, 9),
+        # notebook — underline-style tabs: flat, muted; selected = white text on a subtly
+        # elevated fill with an accent bottom edge (approximated via a colored underline border)
+        st.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(2, 8, 2, 0))
+        st.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(20, 10),
                      font=(FONT, 10, "bold"), borderwidth=0)
-        st.map("TNotebook.Tab", background=[("selected", SURFACE)], foreground=[("selected", FG)],
-               expand=[("selected", (0, 0, 0, 0))])
-        # buttons
-        self._btn_style(st, "Accent.TButton", ACCENT, ACCENT_H)
-        self._btn_style(st, "Success.TButton", GREEN, GREEN_H)
+        st.map("TNotebook.Tab", background=[("selected", SURFACE)], foreground=[("selected", ACCENT)],
+               expand=[("selected", (0, 0, 0, 2))])
+        # buttons — semantic fills: ARM=green, FLATTEN=amber, STOP=red, Save/primary=cyan
+        self._btn_style(st, "Accent.TButton", ACCENT, ACCENT_H, fg="#0B1120")
+        self._btn_style(st, "Success.TButton", GREEN, GREEN_H, fg="#0B1120")
         self._btn_style(st, "Danger.TButton", RED, RED_H)
-        self._btn_style(st, "Warning.TButton", AMBER, AMBER_H, fg="#0d1117")
+        self._btn_style(st, "Warning.TButton", AMBER, AMBER_H, fg="#0B1120")
         self._btn_style(st, "Ghost.TButton", ELEV, BORDER, fg=FG, small=True)
         self.st = st
 
     def _btn_style(self, st, name, bg, hover, fg="#ffffff", small=False):
         st.configure(name, background=bg, foreground=fg, font=(FONT, 10 if small else 11, "bold"),
                      borderwidth=0, relief="flat", focuscolor=bg,
-                     padding=(12, 7) if small else (20, 11))
+                     padding=(14, 8) if small else (22, 12))
         st.map(name, background=[("active", hover), ("pressed", hover), ("disabled", ELEV)],
                foreground=[("disabled", MUTED)])
 
@@ -430,19 +457,20 @@ class ImbabotGUI:
         self.badge_armed.pack(side="left", padx=4)
         ttk.Separator(root).pack(fill="x", padx=20)
 
-        # ===== hero HUD (animated arc-reactor gauge) =====
-        self.hud = HudHero(root, height=280)
-        self.hud.pack(fill="x", padx=20, pady=(12, 4))
-        self.lbl_count = self.hud.field("count")
-        self.lbl_fire = self.hud.field("fire")
-        self.lbl_price = self.hud.field("price")
-        self.lbl_range = self.hud.field("range")
-        self._hud_angle = 0.0
-        self.root.after(60, self._hud_animate)
+        # ===== hero stat cards (replaces the HudHero canvas; same 4 readouts, same
+        # .configure(text=…) update path — HudHero/_HudField stay in the file, dormant) =====
+        self.hud = None
+        hero = ttk.Frame(root, style="TFrame")
+        hero.pack(fill="x", padx=20, pady=(14, 6))
+        self.lbl_count = self._stat(hero, "T-minus to market open", 0, big=True)
+        self.lbl_fire = self._stat(hero, "Next fire", 1)
+        self.lbl_price = self._stat(hero, "Last price", 2)
+        self.lbl_range = self._stat(hero, "Overnight range", 3)
 
-        # ===== control bar =====
-        ctrl = ttk.Frame(root, style="TFrame", padding=(20, 2))
-        ctrl.pack(fill="x")
+        # ===== action card: ARM · mode banner · FLATTEN · EMERGENCY STOP =====
+        # Safety-critical controls stay full-size and top-level (never buried in a tab).
+        ctrl = ttk.Frame(root, style="Surface.TFrame", padding=(16, 12))
+        ctrl.pack(fill="x", padx=20, pady=(6, 4))
         self.btn_arm = ttk.Button(ctrl, text="ARM", command=self._on_arm, style="Success.TButton", width=11)
         self.btn_arm.pack(side="left")
         self.lbl_mode_banner = ttk.Label(ctrl, text="", style="Banner.TLabel")
@@ -453,8 +481,9 @@ class ImbabotGUI:
         self.btn_flatten.pack(side="right", padx=(0, 10))
 
         # ===== settings notebook =====
+        self._scroll_canvases = []      # (canvas, inner) for the scrollable tabs
         nb = ttk.Notebook(root)
-        nb.pack(fill="x", padx=20, pady=(16, 8))
+        nb.pack(fill="both", expand=True, padx=20, pady=(16, 8))
         self._build_tab_connect(nb)
         self._build_tab_strategy(nb)
         self._build_tab_test(nb)
@@ -469,7 +498,7 @@ class ImbabotGUI:
         self.btn_log_toggle.pack(side="left")
         ttk.Button(topbar, text="Save log…", command=self._on_save_log, style="Ghost.TButton").pack(side="right")
         self.txt = tk.Text(self._logwrap, height=9, wrap="word", relief="flat", borderwidth=0,
-                           background="#06141d", foreground=FG, insertbackground=FG,
+                           background=INPUT_BG, foreground=FG, insertbackground=FG,
                            font=(MONO, 10), padx=12, pady=10, highlightthickness=0)
         self.txt.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
         self._log_sb = ttk.Scrollbar(self._logwrap, command=self.txt.yview)
@@ -511,6 +540,55 @@ class ImbabotGUI:
         x = max(0, (sw - w) // 2)
         y = max(0, (sh - h) // 2)
         r.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _grow_to_content(self) -> None:
+        """Grow the window (without moving it) so dynamic content — e.g. the Morning Plan
+        panel after Recalculate — is fully visible without manual resizing. Clamped to the
+        screen; never shrinks below the current size, so it doesn't 'jump'."""
+        try:
+            r = self.root
+            r.update_idletasks()
+            sw, sh = r.winfo_screenwidth(), r.winfo_screenheight()
+            w = min(max(r.winfo_reqwidth(), r.winfo_width()), sw - 40)
+            h = min(max(r.winfo_reqheight() + 6, r.winfo_height()), sh - 60)
+            r.geometry(f"{w}x{h}")
+        except Exception:
+            pass
+
+    def _scrollable_tab(self, nb, title: str, padding: int = 18):
+        """Add a notebook tab whose body scrolls vertically, and return the inner frame to
+        build into. Lets tall content (e.g. the Morning Plan) stay reachable on small screens
+        where the window is clamped to the display — caller code grids into the returned frame
+        exactly as before."""
+        outer = ttk.Frame(nb, style="Surface.TFrame")
+        nb.add(outer, text=title)
+        canvas = tk.Canvas(outer, bg=SURFACE, highlightthickness=0, borderwidth=0)
+        vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview,
+                            style="Vertical.TScrollbar")
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        inner = ttk.Frame(canvas, style="Surface.TFrame", padding=padding)
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner(_e=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Request just enough height to show the content on a big screen; the window's
+            # screen-clamp then forces the canvas to scroll on a small one.
+            sh = canvas.winfo_screenheight()
+            canvas.configure(height=min(inner.winfo_reqheight(), sh - 220))
+
+        def _on_canvas(e):
+            canvas.itemconfigure(win, width=e.width)  # inner matches width -> no h-scroll, labels wrap
+
+        inner.bind("<Configure>", _on_inner)
+        canvas.bind("<Configure>", _on_canvas)
+        # Mouse-wheel scrolls only while the pointer is over this tab.
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all(
+            "<MouseWheel>", lambda ev: canvas.yview_scroll(int(-ev.delta / 120), "units")))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        self._scroll_canvases.append((canvas, inner))
+        return inner
 
     def _build_tab_connect(self, nb) -> None:
         tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
@@ -556,8 +634,7 @@ class ImbabotGUI:
         self.lbl_conn.grid(row=8, column=2, columnspan=2, sticky="w", padx=10)
 
     def _build_tab_strategy(self, nb) -> None:
-        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
-        nb.add(tab, text="Strategy")
+        tab = self._scrollable_tab(nb, "Strategy")
 
         ttk.Label(tab, text="Account", style="Sm.TLabel").grid(row=0, column=0, sticky="w", pady=5)
         self.cmb_account = ttk.Combobox(tab, state="readonly", width=30, values=[], font=(FONT, 11))
@@ -594,25 +671,30 @@ class ImbabotGUI:
         self.ent_tp.grid(row=5, column=1, sticky="w", pady=5)
         self._on_bracket_toggle()    # set initial grayed/enabled state from settings
 
-        self.var_mode = tk.StringVar(value=self.settings.trade_mode)
+        # Only One-Trade is exposed. Semi-Auto / Two-Trade remain in the engine
+        # (TradeMode values) but are no longer offered in the UI.
+        self.var_mode = tk.StringVar(value="one_trade")
         ttk.Label(tab, text="Mode", style="Hs.TLabel").grid(row=3, column=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="Semi-Auto (you manage)", variable=self.var_mode, value="semi_auto",
-                        style="S.TRadiobutton").grid(row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="One-Trade (auto OCO)  ✓ recommended", variable=self.var_mode,
+        ttk.Radiobutton(tab, text="One-Trade (auto OCO)  ✓", variable=self.var_mode,
                         value="one_trade", style="Req.TRadiobutton").grid(
-                        row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Radiobutton(tab, text="Two-Trade (leave both in)", variable=self.var_mode, value="two_trade",
-                        style="S.TRadiobutton").grid(row=6, column=2, columnspan=2, sticky="w", padx=(28, 0))
+                        row=4, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        # use_live_data is hidden — the engine auto-detects the live/sim feed. The var
+        # is retained (default off) so settings + the advanced override still work.
+        self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
+        self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
+        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
+                        style="S.TCheckbutton").grid(row=5, column=2, columnspan=2, sticky="w", padx=(28, 0))
+        # Stop-limit entries: cap slippage past the trigger (forward-test on PRAC).
+        self.var_stop_limit = tk.BooleanVar(value=self.settings.entry_order_type == "stop_limit")
+        self.var_limit_off = tk.StringVar(value=str(self.settings.entry_limit_offset_ticks))
+        ttk.Checkbutton(tab, text="Stop-limit entries (cap slippage)", variable=self.var_stop_limit,
+                        style="S.TCheckbutton").grid(row=6, column=2, sticky="w", padx=(28, 0))
+        ttk.Entry(tab, textvariable=self.var_limit_off, width=4, font=(FONT, 11)).grid(
+            row=6, column=3, sticky="w")
         ttk.Label(tab, text="Stop-loss / Take-profit are handled by TopStep (Position Brackets) by "
                             "default. Tick a box to let the BOT manage that bracket instead — only if "
                             "your TopStep account is in Auto OCO Brackets mode (not Position Brackets).",
                   style="Hint.TLabel", wraplength=520).grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        self.var_live_data = tk.BooleanVar(value=self.settings.use_live_data)
-        self.var_dry = tk.BooleanVar(value=self.settings.dry_run)
-        ttk.Checkbutton(tab, text="Use live data feed", variable=self.var_live_data,
-                        style="S.TCheckbutton").grid(row=7, column=2, columnspan=2, sticky="w", padx=(28, 0))
-        ttk.Checkbutton(tab, text="DRY-RUN (no real orders)", variable=self.var_dry, command=self._on_dry_toggle,
-                        style="S.TCheckbutton").grid(row=8, column=2, columnspan=2, sticky="w", padx=(28, 0))
         ttk.Button(tab, text="Save settings", command=self._on_save, style="Accent.TButton").grid(
             row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
@@ -632,9 +714,62 @@ class ImbabotGUI:
                             "skipped — disarm on holidays.",
                   style="Hint.TLabel", wraplength=860).grid(row=12, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
+        # --- Morning Plan (tick-data: volatility + TP-driven sizing/spread; advisory) ---
+        ttk.Separator(tab).grid(row=13, column=0, columnspan=5, sticky="ew", pady=(16, 6))
+        ttk.Label(tab, text="Morning Plan — tick-data (advisory; the bot never changes your settings)",
+                  style="Hs.TLabel").grid(row=14, column=0, columnspan=5, sticky="w")
+        self.lbl_mp_action = ttk.Label(tab, text="— not yet calculated —", style="Hs.TLabel")
+        self.lbl_mp_action.grid(row=15, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.btn_mp_recalc = ttk.Button(tab, text="↻ Recalculate now",
+                                        command=self._on_morning_recalc, style="Accent.TButton")
+        self.btn_mp_recalc.grid(row=15, column=2, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(tab, text="Profit target $", style="Sm.TLabel").grid(row=16, column=0, sticky="w", pady=(8, 0))
+        self.var_mp_target = tk.StringVar(value="800")
+        ttk.Entry(tab, textvariable=self.var_mp_target, width=10, font=(FONT, 11)).grid(
+            row=16, column=1, sticky="w", padx=6, pady=(8, 0))
+        ttk.Label(tab, text="(drives the TopStep inputs below on Recalculate; capped at 5 contracts)",
+                  style="Hint.TLabel").grid(row=16, column=2, columnspan=3, sticky="w", pady=(8, 0))
+        # The headline that tells the user exactly what to type into TopStep, followed by the
+        # four stat cells (TP tinted green / SL tinted red) that carry the actual numbers.
+        self.lbl_mp_inputs = ttk.Label(tab, text="", style="Hs.TLabel", foreground=GREEN_H)
+        self.lbl_mp_inputs.grid(row=17, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        self.mp_cells = ttk.Frame(tab, style="Surface.TFrame")
+        self.mp_cells.grid(row=18, column=0, columnspan=5, sticky="w", pady=(6, 2))
+        self.cell_mp_ct = self._mp_cell(self.mp_cells, "CONTRACTS", 0, "plain")
+        self.cell_mp_entry = self._mp_cell(self.mp_cells, "ENTRY (PTS)", 1, "plain")
+        self.cell_mp_tp = self._mp_cell(self.mp_cells, "TAKE-PROFIT", 2, "green")
+        self.cell_mp_sl = self._mp_cell(self.mp_cells, "STOP-LOSS", 3, "red")
+        self.mp_cells.grid_remove()
+        # Amber cap alert — shown only when the entered $TP would need > the contract cap (5).
+        self.lbl_mp_alert = ttk.Label(tab, text="", style="Hs.TLabel", foreground=AMBER,
+                                      wraplength=860)
+        self.lbl_mp_alert.grid(row=19, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.lbl_mp_alert.grid_remove()
+        self.lbl_mp_sizing = ttk.Label(tab, text="", style="Sm.TLabel", wraplength=860)
+        self.lbl_mp_sizing.grid(row=20, column=0, columnspan=5, sticky="w", pady=(2, 0))
+        self.lbl_mp_detail = ttk.Label(
+            tab, text="Enter a profit-target $, then Recalculate for the volatility, predicted spike, "
+                      "TRADE/NO-TRADE, and the contracts + entry spread to use.",
+            style="Sm.TLabel", wraplength=860)
+        self.lbl_mp_detail.grid(row=21, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+    def _mp_cell(self, parent, title: str, col: int, kind: str = "plain"):
+        """One Morning-Plan stat cell: tiny uppercase title over a large mono value.
+        kind: 'plain' (elevated) | 'green' (tinted, TP) | 'red' (tinted, SL)."""
+        fr_style, ti_style, va_style = {
+            "plain": ("Cell.TFrame", "CellTitle.TLabel", "CellVal.TLabel"),
+            "green": ("TintGreen.TFrame", "TintTitleG.TLabel", "TintValG.TLabel"),
+            "red": ("TintRed.TFrame", "TintTitleR.TLabel", "TintValR.TLabel"),
+        }[kind]
+        cell = ttk.Frame(parent, style=fr_style, padding=(18, 10))
+        cell.grid(row=0, column=col, padx=(0 if col == 0 else 10, 0), sticky="nsew")
+        ttk.Label(cell, text=title, style=ti_style).pack(anchor="w")
+        val = ttk.Label(cell, text="—", style=va_style)
+        val.pack(anchor="w", pady=(3, 0))
+        return val
+
     def _build_tab_test(self, nb) -> None:
-        tab = ttk.Frame(nb, style="Surface.TFrame", padding=18)
-        nb.add(tab, text="Test")
+        tab = self._scrollable_tab(nb, "Test")
         ttk.Label(tab, text="Verify it actually places orders", style="Hs.TLabel").grid(
             row=0, column=0, columnspan=3, sticky="w")
         self.var_test_mode = tk.BooleanVar(value=self.settings.test_mode)
@@ -712,6 +847,8 @@ class ImbabotGUI:
             s.bot_stop_loss = bool(self.var_bot_sl.get())
             s.bot_take_profit = bool(self.var_bot_tp.get())
             s.trade_mode = self.var_mode.get()
+            s.entry_order_type = "stop_limit" if self.var_stop_limit.get() else "stop"
+            s.entry_limit_offset_ticks = int(self.var_limit_off.get())
             s.use_live_data = bool(self.var_live_data.get())
             s.dry_run = bool(self.var_dry.get())
         except ValueError as exc:
@@ -763,7 +900,7 @@ class ImbabotGUI:
         if browser:
             self.lbl_backend_hint.configure(
                 text="Browser mode: a real Chrome window opens; you log in, then Arm. TopstepX (projectx) "
-                     "ships pre-calibrated — use Semi-Auto.")
+                     "ships pre-calibrated.")
         else:
             self.lbl_backend_hint.configure(
                 text="API mode: official TopstepX API (recommended). Needs your API key.")
@@ -1136,8 +1273,141 @@ class ImbabotGUI:
             self._update_ticker(evt[1])
         elif kind == "ticker_vix":
             self._update_vix(evt[1])
+        elif kind == "morning_plan":
+            self._show_morning_plan(evt[1])
+        elif kind == "morning_error":
+            self.btn_mp_recalc.configure(state="normal")
+            self.lbl_mp_action.configure(text="—")
+            self.lbl_mp_detail.configure(text=f"Morning Plan error: {evt[1]}")
+            self.log(f"morning plan: {evt[1]}", "error")
         elif kind == "error":
             self.log(evt[1], "error")
+
+    # ---------------------------------------------------- Morning Plan (advisory)
+    def _on_morning_recalc(self) -> None:
+        self.btn_mp_recalc.configure(state="disabled")
+        self.lbl_mp_action.configure(text="… calculating …")
+        threading.Thread(target=self._morning_recalc_worker, daemon=True).start()
+
+    def _morning_recalc_worker(self) -> None:
+        try:
+            from datetime import datetime
+            from .analysis.tick_runner import morning_plan
+            # Pull fresh daily VIX + NQ so the prior-close features (VIX level, overnight gap)
+            # aren't stale. Best-effort: refresh() falls back to the cache on any failure.
+            try:
+                from .analysis.market_history import refresh, VIX_SYMBOL, NQ_SYMBOL
+                refresh(VIX_SYMBOL)
+                refresh(NQ_SYMBOL)
+            except Exception:
+                pass
+            target = 800.0
+            t = self.var_mp_target.get().strip()
+            if t:
+                try:
+                    target = float(t.replace("$", "").replace(",", ""))
+                except ValueError:
+                    pass
+            dpp = 20.0
+            if self.engine:
+                c = getattr(self.engine, "contract", None)
+                if c and c.tick_size:
+                    dpp = c.tick_value / c.tick_size
+            # "as of today" -> morning_plan rolls weekends/holidays to the next real session.
+            today = datetime.now().astimezone().date().isoformat()
+            mp = morning_plan(today, target_dollars=target, dollars_per_point=dpp,
+                              max_contracts=self.settings.max_contracts)
+            self.events.put(("morning_plan", mp))
+        except Exception as exc:
+            self.events.put(("morning_error", str(exc)))
+
+    def _vix_is_stale(self, session_date: str) -> bool:
+        """True if the cached VIX daily close is older than the session's prior trading day
+        (i.e. the refresh failed and we're showing a stale prior-close feature)."""
+        try:
+            from datetime import date as _d, timedelta
+            from .analysis.market_history import load_daily, VIX_SYMBOL, by_date, prior_value
+            from .market_calendar import is_trading_day
+            pv = prior_value(by_date(load_daily(VIX_SYMBOL)), session_date)
+            if not pv:
+                return True
+            d = _d.fromisoformat(session_date) - timedelta(days=1)
+            while not is_trading_day(d):
+                d -= timedelta(days=1)
+            return pv.date < d.isoformat()
+        except Exception:
+            return False
+
+    def _show_morning_plan(self, mp) -> None:
+        from datetime import date as _date
+        self.btn_mp_recalc.configure(state="normal")
+        tag = "✅ TRADE" if mp.decision == "TRADE" else "⛔ NO-TRADE"
+        try:
+            sess = _date.fromisoformat(mp.session_date).strftime("%a %b %d")
+        except Exception:
+            sess = mp.session_date
+        banner = "  ·  ⚠ MARKET CLOSED TODAY — plan is for the NEXT session" if mp.market_closed_today else ""
+        cal = "" if mp.calibrated else "  ·  UNCALIBRATED"
+        self.lbl_mp_action.configure(
+            text=f"{tag}  ·  {mp.conviction}  ·  Session: {sess}  ·  Vol {mp.volatility}  ·  "
+                 f"spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{banner}{cal}")
+        p = mp.plan
+        # Headline + 4 stat cells = sized to the USER'S profit-target box (what to type into
+        # TopStep for that target). The 5-contract daily MAX is shown separately below.
+        if mp.decision == "TRADE" and p.feasible:
+            self.lbl_mp_inputs.configure(text="➡  ENTER IN TOPSTEP", foreground=GREEN_H)
+            self.cell_mp_ct.configure(text=f"{p.contracts}")
+            self.cell_mp_entry.configure(text=f"±{p.entry_spread:.0f}")
+            self.cell_mp_tp.configure(text=f"${p.achievable_dollars:,.0f}")
+            self.cell_mp_sl.configure(text=f"${p.sl_bracket_dollars:,.0f}")
+            self.mp_cells.grid()
+            sized = (f"Your ${p.target_dollars:,.0f} target exceeds the {p.max_contracts}-contract max — "
+                     f"sized to the max instead" if p.capped else
+                     f"Sized to your ${p.target_dollars:,.0f} target")
+            self.lbl_mp_sizing.configure(
+                text=(f"{sized} — TP {p.tp_distance_points:.0f}pt, "
+                      f"reachable inside the ~1-second opening spike."
+                      f"\nToday's MAX at {p.max_contracts} contracts:  "
+                      f"Take-Profit ${p.recommended_tp_dollars:,.0f}  ·  "
+                      f"Stop-Loss ${p.recommended_sl_dollars:,.0f}."))
+            # Alert only when the entered target EXCEEDS what 5 contracts can reach.
+            if p.capped:
+                self.lbl_mp_alert.configure(
+                    text=f"⚠  Your ${p.target_dollars:,.0f} target needs ~{p.contracts_wanted} contracts — "
+                         f"capped at {p.max_contracts}. The max at {p.max_contracts} contracts today is "
+                         f"${p.recommended_tp_dollars:,.0f} — use that.")
+                self.lbl_mp_alert.grid()
+            else:
+                self.lbl_mp_alert.grid_remove()
+        else:
+            self.lbl_mp_inputs.configure(text="➡  NO-TRADE — sit out today", foreground=RED_H)
+            self.mp_cells.grid_remove()
+            self.lbl_mp_sizing.configure(text="")
+            self.lbl_mp_alert.grid_remove()
+        # VIX shown is the PRIOR SESSION CLOSE (the model feature) — flag if the daily cache is stale.
+        if mp.prior_vix:
+            stale = "  ⚠ stale" if self._vix_is_stale(mp.session_date) else ""
+            vix = f"VIX {mp.prior_vix:.1f} (prior close){stale}"
+        else:
+            vix = "VIX n/a"
+        if getattr(mp, "overnight_gap", None) is not None:
+            early = "" if getattr(mp, "gap_fresh", True) else " (early ⚠)"
+            gap = f"Gap {mp.overnight_gap:.0f}pt{early}"
+        else:
+            gap = "Gap n/a"
+        self.lbl_mp_detail.configure(
+            text=f"{vix}  ·  {gap}  ·  News: {mp.news_label}\n{mp.rationale}")
+        self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
+                 f"-> {p.contracts if (mp.decision=='TRADE' and p.feasible) else 0}ct")
+        self._grow_to_content()
+        # Make sure the plan is in view even when the window is clamped on a small screen:
+        # scroll the Strategy tab (first scrollable tab) to reveal the bottom panel.
+        try:
+            canvas = self._scroll_canvases[0][0]
+            canvas.update_idletasks()
+            canvas.yview_moveto(1.0)
+        except Exception:
+            pass
 
     def _append_log(self, line: str, level: str = "info") -> None:
         self.txt.configure(state="normal")
@@ -1207,9 +1477,10 @@ class ImbabotGUI:
         self.root.after(1000, self._tick_countdown)
 
     def _hud_animate(self) -> None:
-        if not self.root.winfo_exists():
+        """Dormant since the fintech-dashboard restyle (no HudHero instance; not scheduled)."""
+        if self.hud is None or not self.root.winfo_exists():
             return
-        self._hud_angle = (self._hud_angle + 2.2) % 360
+        self._hud_angle = (getattr(self, "_hud_angle", 0.0) + 2.2) % 360
         try:
             self.hud.animate(self._hud_angle)
         except Exception:

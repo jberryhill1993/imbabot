@@ -16,6 +16,7 @@ class OrderType(IntEnum):
 
     LIMIT = 1
     MARKET = 2
+    STOP_LIMIT = 3   # stop entry that won't fill worse than its limit (verify code vs live API)
     STOP = 4
     TRAILING_STOP = 5
     JOIN_BID = 6
@@ -133,6 +134,7 @@ class StraddleLeg:
     take_profit_ticks: int     # target distance, in ticks from fill
     custom_tag: str
     order_id: Optional[int] = None  # filled in after placement
+    limit_price: Optional[float] = None  # set -> STOP-LIMIT entry (cap slippage past trigger)
 
 
 @dataclass

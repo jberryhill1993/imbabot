@@ -1,8 +1,10 @@
 """Fire-time scheduling, anchored to the US cash-equity open (09:30 America/New_York).
 
-The bot captures the reference price a few seconds *before* the open
-(``capture_offset_seconds``, default 3 -> 09:29:57) and treats that as the fire
-moment. Times are computed in the market's own timezone so DST is handled for you.
+The bot captures the reference price just *before* the open
+(``capture_offset_seconds``, default 1 -> 09:29:59) and treats that as the fire
+moment. Kept tight: orders resting longer pre-open get triggered by the last-seconds
+churn (measured −$4,660/yr at 4ct with a ~2s resting window). Times are computed in
+the market's own timezone so DST is handled for you.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ def _tz(name: str):
 
 def next_fire_time(
     open_time: dtime,
-    capture_offset_seconds: int = 3,
+    capture_offset_seconds: int = 1,
     market_tz: str = MARKET_TZ,
     now: Optional[datetime] = None,
 ) -> datetime:
@@ -80,18 +82,19 @@ def next_local_fire(time_str: str, now: Optional[datetime] = None) -> datetime:
 
 
 def next_weekday_local_fire(time_str: str, now: Optional[datetime] = None) -> datetime:
-    """Next Mon–Fri occurrence of a wall-clock time in the MACHINE's local tz.
+    """Next TRADING-DAY occurrence of a wall-clock time in the MACHINE's local tz.
 
-    Like ``next_local_fire`` but rolls forward over Saturday/Sunday, so a daily
-    production schedule fires only on weekdays. (Market *holidays* that fall on a
-    weekday are NOT skipped — there's no calendar — so disarm on those days.)
+    Like ``next_local_fire`` but rolls forward over weekends AND US market holidays
+    (via ``market_calendar``), so a daily production schedule never targets a closed
+    market — e.g. the Friday before a Monday holiday rolls to Tuesday.
     """
+    from .market_calendar import is_trading_day
     t = parse_hms(time_str)
     now = now or datetime.now().astimezone()  # local, tz-aware
     target = now.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
-    while target.weekday() >= 5:      # Sat=5, Sun=6 -> roll to Monday
+    while not is_trading_day(target.date()):   # skip weekends + market holidays
         target += timedelta(days=1)
     return target
 

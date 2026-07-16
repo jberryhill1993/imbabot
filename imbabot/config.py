@@ -14,8 +14,14 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import Optional
 
-APP_NAME = "imbabot"
-KEYRING_SERVICE = "imbabot-projectx"
+# Dev/test builds keep their state SEPARATE from the stable bot so the two can run
+# side by side (e.g. a 0.2.1-dev test bot on a practice account next to the stable
+# 0.2.0.1 bot on funded accounts) without sharing settings or stored API keys.
+from . import __version__  # __init__ imports nothing heavy -> no circular import
+
+_DEV = "dev" in __version__.lower()
+APP_NAME = "imbabot-dev" if _DEV else "imbabot"
+KEYRING_SERVICE = "imbabot-projectx-dev" if _DEV else "imbabot-projectx"
 
 
 def config_dir() -> Path:
@@ -68,12 +74,21 @@ class Settings:
     # TopStep account to be in Auto OCO Brackets mode, not Position Brackets).
     bot_stop_loss: bool = False
     bot_take_profit: bool = False
+    # Entry order type: "stop" (market stop — always fills if touched, may slip) or
+    # "stop_limit" (won't fill worse than entry_limit_offset_ticks past the trigger —
+    # caps slippage but can miss fast breakouts). Forward-test stop_limit on PRAC.
+    entry_order_type: str = "stop"
+    entry_limit_offset_ticks: int = 4   # 4 ticks = 1.0 pt on NQ/MNQ
 
     # --- timing ---
     market_tz: str = "America/New_York"
     open_hour: int = 9
     open_minute: int = 30
-    capture_offset_seconds: int = 3   # capture price 3s before the open
+    # Capture the reference 1s before the open (was 3s). Orders resting longer pre-open get
+    # triggered by the last-seconds churn: 13/264 days crossed ±10 pre-open, −$4,660/yr at 4ct,
+    # and 4 of 5 outcome-flips turned winners into losers (incl. live 7/6/26). Keep the PC clock
+    # synced — a fast clock widens the real pre-open window regardless of this setting.
+    capture_offset_seconds: int = 1
 
     # --- test mode (fire at a custom local time to verify it works) ---
     test_mode: bool = False           # if True, fire at test_fire_time instead of the 09:30 open
@@ -83,6 +98,16 @@ class Settings:
     # If set, the bot fires at this local wall-clock time every weekday (Mon–Fri)
     # and re-arms itself after each fire. Empty = use the 09:30 open default.
     strategy_fire_time: str = ""      # "HH:MM:SS" in YOUR local time, or "" to disable
+
+    # --- Morning Plan analyzer (advisory) ---
+    analysis_slippage_points: float = 2.0    # adverse slip per stop fill (entry + stop-loss)
+    analysis_commission_points: float = 0.13  # round-trip commission/contract in points (~$2.6 NQ)
+    analysis_min_spread: float = 10.0        # never recommend an entry tighter than this
+    analysis_tp_points: float = 13.3         # take-profit distance the model assumes (pts)
+    # Advisory ONLY (does not affect live trading): how many seconds of the 09:30:00
+    # open to measure the "opening spike" (max swing from the open print). The Morning
+    # Plan predicts today's spike from pre-open conditions to flag whipsaw risk.
+    analysis_spike_window_seconds: int = 3
 
     # --- backend selection ---
     backend: str = "api"              # "api" (ProjectX REST) | "browser" (automation)
@@ -115,6 +140,10 @@ class Settings:
         if not path.exists():
             return cls()
         raw = json.loads(path.read_text(encoding="utf-8"))
+        # Migration: 3s was the old default (never user-exposed in the GUI). Installs that
+        # persisted it inherit the new 1s default — see capture_offset_seconds above.
+        if raw.get("capture_offset_seconds") == 3:
+            raw.pop("capture_offset_seconds")
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in raw.items() if k in known})
 

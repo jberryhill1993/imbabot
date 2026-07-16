@@ -60,9 +60,14 @@ def main() -> int:
         except Exception as exc:
             print(f"PACK_CHECK_FAIL {exc} dir={_PACK_DIR}")
             return 1
-    from imbabot.gui import main as gui_main
-
-    return gui_main()
+    if args and args[0] == "--classic":
+        # Rollback path: the original Tkinter GUI, fully functional.
+        from imbabot.gui import main as gui_main
+        return gui_main()
+    # Default on the UI branch: the glass web dashboard (falls back to the
+    # classic GUI automatically if pywebview isn't available).
+    from imbabot.webui import run_webui
+    return run_webui()
 
 
 if __name__ == "__main__":
