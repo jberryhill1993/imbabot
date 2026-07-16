@@ -924,5 +924,97 @@ def run_selftest() -> int:
     except TradovateError:
         _check("tdv session_range raises (documented limitation)", True)
 
+    # 13f) Tradovate WebSocket codec + caches — canned frames, no sockets.
+    from .tradovate.ws import (QuoteCache, UserSyncCache, encode_request,
+                               md_ws_url, parse_frame, user_ws_url)
+
+    _check("tdv ws urls: demo", user_ws_url("demo").startswith("wss://demo.")
+           and md_ws_url("demo").startswith("wss://md-demo."))
+    _check("tdv ws urls: live", user_ws_url("live").startswith("wss://live.")
+           and md_ws_url("live").startswith("wss://md."))
+
+    _check("tdv ws encode: authorize framing",
+           encode_request("authorize", 1, "tok-X") == "authorize\n1\ntok-X\n")
+    _check("tdv ws encode: body json",
+           encode_request("user/syncrequest", 2, body={"users": [5]})
+           == 'user/syncrequest\n2\n\n{"users": [5]}')
+    _check("tdv ws parse: open/heartbeat",
+           parse_frame("o")[0] == "open" and parse_frame("h")[0] == "heartbeat")
+    kind, msgs = parse_frame('a[{"s":200,"i":1,"d":{"ok":true}}]')
+    _check("tdv ws parse: message array", kind == "messages" and msgs[0]["i"] == 1)
+    kind, payload = parse_frame('c[1001,"gone"]')
+    _check("tdv ws parse: close frame", kind == "close" and payload == [1001, "gone"])
+
+    # UserSyncCache: snapshot ingest -> props events -> merged rows
+    kills = []
+    cache = UserSyncCache(on_kill=kills.append, max_daily_loss=500.0)
+    cache.ingest_sync({
+        "orders": [{"id": 111, "accountId": 7001, "ordStatus": "Working",
+                    "action": "Buy", "contractId": 901}],
+        "orderVersions": [{"id": 5001, "orderId": 111, "orderQty": 1,
+                           "orderType": "Stop", "stopPrice": 21012.0}],
+        "positions": [{"id": 61, "accountId": 7001, "contractId": 901, "netPos": 0}],
+        "cashBalances": [{"id": 81, "accountId": 7001, "amount": 50000.0,
+                          "tradeDate": {"year": 2026, "month": 7, "day": 16}}],
+    })
+    rows = cache.rows("orders")
+    _check("tdv cache: order merged with version",
+           rows[0]["id"] == 111 and rows[0]["stopPrice"] == 21012.0
+           and rows[0]["orderQty"] == 1, f"got {rows}")
+
+    # props: order fills (Updated ordStatus) + a new version + position update
+    cache.apply_props("order", "Updated",
+                      {"id": 111, "accountId": 7001, "ordStatus": "Filled",
+                       "action": "Buy", "contractId": 901})
+    cache.apply_props("orderVersion", "Created",
+                      {"id": 5002, "orderId": 111, "orderQty": 1,
+                       "orderType": "Stop", "stopPrice": 21015.0})
+    cache.apply_props("position", "Updated",
+                      {"id": 61, "accountId": 7001, "contractId": 901,
+                       "netPos": 1, "netPrice": 21012.25})
+    rows = cache.rows("orders")
+    _check("tdv cache: props update order status + latest version wins",
+           rows[0]["ordStatus"] == "Filled" and rows[0]["stopPrice"] == 21015.0)
+    _check("tdv cache: position updated via props",
+           cache.rows("positions")[0]["netPos"] == 1)
+    cache.apply_props("order", "Deleted", {"id": 111})
+    _check("tdv cache: props delete removes order", cache.rows("orders") == [])
+    cache.apply_props("unknownEntity", "Created", {"id": 1})  # ignored, no crash
+    _check("tdv cache: unknown entity types ignored", True)
+
+    # daily-loss kill switch: amount-delta path (baseline 50k -> -520 breaches 500)
+    _check("tdv kill: not tripped at baseline", kills == [])
+    cache.apply_props("cashBalance", "Updated",
+                      {"id": 81, "accountId": 7001, "amount": 49480.0,
+                       "tradeDate": {"year": 2026, "month": 7, "day": 16}})
+    _check("tdv kill: -520 trips the -500 switch",
+           len(kills) == 1 and "-520" in kills[0], f"got {kills}")
+    cache.apply_props("cashBalance", "Updated",
+                      {"id": 81, "accountId": 7001, "amount": 49000.0,
+                       "tradeDate": {"year": 2026, "month": 7, "day": 16}})
+    _check("tdv kill: fires only once", len(kills) == 1)
+
+    # realizedPnL path (preferred when the venue provides it)
+    kills2 = []
+    cache2 = UserSyncCache(on_kill=kills2.append, max_daily_loss=500.0)
+    cache2.apply_props("cashBalance", "Updated",
+                       {"id": 82, "accountId": 7001, "amount": 51000.0,
+                        "realizedPnL": -501.0,
+                        "tradeDate": {"year": 2026, "month": 7, "day": 16}})
+    _check("tdv kill: realizedPnL field preferred", len(kills2) == 1, f"got {kills2}")
+
+    # QuoteCache: trade price, bid/offer mid fallback, merge, staleness
+    qclock = [1000.0]
+    qc = QuoteCache(clock=lambda: qclock[0], stale_after=10.0)
+    qc.update("MNQU6", {"Bid": {"price": 21010.0}, "Offer": {"price": 21010.5}})
+    _check("tdv quotes: bid/offer mid when no trade",
+           qc.last_price("MNQU6") == 21010.25)
+    qc.update("MNQU6", {"Trade": {"price": 21011.0, "size": 2}})
+    _check("tdv quotes: trade price preferred (merge kept bid/offer)",
+           qc.last_price("MNQU6") == 21011.0)
+    qclock[0] += 11.0
+    _check("tdv quotes: stale after 10s -> None", qc.last_price("MNQU6") is None)
+    _check("tdv quotes: unknown symbol -> None", qc.last_price("ESU6") is None)
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

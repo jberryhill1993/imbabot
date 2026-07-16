@@ -386,7 +386,7 @@ class TradovateClient:
         info = self._contract_info(contract_id)
         if self._md_ws is None:
             raise TradovateError("Market-data socket not connected.")
-        self._md_ws.subscribe_quote(info["name"])
+        self._md_ws.subscribe_quote(info["name"], info["id"])
         price = self._md_ws.quotes.last_price(info["name"])
         if price is None:
             raise TradovateError(
