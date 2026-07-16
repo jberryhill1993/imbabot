@@ -659,5 +659,90 @@ def run_selftest() -> int:
     finally:
         _cfg._keyring = _orig_keyring
 
+    # 13d) Tradovate token lifecycle — offline, scripted transport + fake clock.
+    from .tradovate.auth import (RENEW_HEADROOM, TokenManager, TradovateAuthError,
+                                 TradovateCredentials)
+
+    creds = TradovateCredentials(username="u", password="p", cid="123",
+                                 sec="s", app_id="Imbabot", device_id="dev1")
+    _check("tdv auth body: cid sent as int, appVersion present",
+           creds.body()["cid"] == 123 and bool(creds.body()["appVersion"]))
+
+    class _Script:
+        """Scripted HTTP transport + clock + sleep recorder."""
+        def __init__(self, responses):
+            self.responses = list(responses)
+            self.calls = []          # (method, path, body)
+            self.now = 1_000_000.0
+            self.slept = []
+        def http(self, method, url, body, headers, timeout):
+            self.calls.append((method, url.rsplit("/", 1)[-1], body))
+            return self.responses.pop(0)
+        def clock(self):
+            return self.now
+        def sleep(self, s):
+            self.slept.append(s)
+
+    def _tok(exp_offset, token="tok-1", md=None, script_now=1_000_000.0):
+        iso = datetime.fromtimestamp(script_now + exp_offset, tz=ZoneInfo("UTC")
+                                     ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        d = {"accessToken": token, "expirationTime": iso, "userId": 9}
+        if md:
+            d["mdAccessToken"] = md
+        return (200, d)
+
+    # acquire parses token + expiry; md token falls back to access token when absent
+    sc = _Script([_tok(90 * 60, "tok-A")])
+    tm = TokenManager("https://demo.example/v1", creds,
+                      http=sc.http, clock=sc.clock, sleep=sc.sleep)
+    _check("tdv acquire returns token", tm.access_token() == "tok-A")
+    _check("tdv acquire hit accesstokenrequest",
+           sc.calls[0][1] == "accesstokenrequest" and sc.calls[0][0] == "POST")
+    _check("tdv md token falls back to access token", tm.md_token() == "tok-A")
+    _check("tdv cached: no extra http calls", len(sc.calls) == 1, f"{len(sc.calls)} calls")
+    _check("tdv authenticated property", tm.authenticated)
+
+    # near expiry -> proactive renew (GET renewaccesstoken), BEFORE any failure
+    sc.now += 90 * 60 - RENEW_HEADROOM + 1
+    sc.responses.append(_tok(90 * 60, "tok-B", md="md-B", script_now=sc.now))
+    _check("tdv proactive renew returns fresh token", tm.access_token() == "tok-B")
+    _check("tdv renew used GET renewaccesstoken",
+           sc.calls[-1][0] == "GET" and sc.calls[-1][1] == "renewaccesstoken")
+    _check("tdv renew captured mdAccessToken", tm.md_token() == "md-B")
+
+    # renew failure falls back to a full re-acquire
+    sc.now += 90 * 60
+    sc.responses += [(500, {}), _tok(90 * 60, "tok-C", script_now=sc.now)]
+    _check("tdv renew failure -> full re-acquire", tm.access_token() == "tok-C")
+    _check("tdv re-acquire hit accesstokenrequest", sc.calls[-1][1] == "accesstokenrequest")
+
+    # p-ticket penalty: wait p-time, retry with the ticket in the body
+    sc2 = _Script([(200, {"p-ticket": "T-1", "p-time": 4}), _tok(90 * 60, "tok-P")])
+    tm2 = TokenManager("https://demo.example/v1", creds,
+                       http=sc2.http, clock=sc2.clock, sleep=sc2.sleep)
+    _check("tdv p-ticket retry succeeds", tm2.access_token() == "tok-P")
+    _check("tdv p-ticket waited p-time", sc2.slept == [4.0], f"got {sc2.slept}")
+    _check("tdv p-ticket re-sent with ticket", sc2.calls[-1][2].get("p-ticket") == "T-1")
+
+    # p-captcha cannot be automated -> clear user-facing error
+    sc3 = _Script([(200, {"p-ticket": "T-2", "p-time": 2, "p-captcha": True})])
+    tm3 = TokenManager("https://demo.example/v1", creds,
+                       http=sc3.http, clock=sc3.clock, sleep=sc3.sleep)
+    try:
+        tm3.access_token()
+        _check("tdv p-captcha raises", False, "no exception")
+    except TradovateAuthError as exc:
+        _check("tdv p-captcha raises", "captcha" in str(exc).lower())
+
+    # bad credentials -> TradovateAuthError with the server's errorText
+    sc4 = _Script([(401, {"errorText": "Incorrect username or password"})])
+    tm4 = TokenManager("https://demo.example/v1", creds,
+                       http=sc4.http, clock=sc4.clock, sleep=sc4.sleep)
+    try:
+        tm4.access_token()
+        _check("tdv bad creds raise", False, "no exception")
+    except TradovateAuthError as exc:
+        _check("tdv bad creds raise", "Incorrect" in str(exc))
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
