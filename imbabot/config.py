@@ -22,6 +22,7 @@ from . import __version__  # __init__ imports nothing heavy -> no circular impor
 _DEV = "dev" in __version__.lower()
 APP_NAME = "imbabot-dev" if _DEV else "imbabot"
 KEYRING_SERVICE = "imbabot-projectx-dev" if _DEV else "imbabot-projectx"
+KEYRING_SERVICE_TDV = "imbabot-tradovate-dev" if _DEV else "imbabot-tradovate"
 
 
 def config_dir() -> Path:
@@ -110,13 +111,20 @@ class Settings:
     analysis_spike_window_seconds: int = 3
 
     # --- backend selection ---
-    backend: str = "api"              # "api" (ProjectX REST) | "browser" (automation)
+    backend: str = "api"              # "api" (ProjectX REST) | "tradovate" (Tradovate REST+WS) | "browser" (automation)
     browser_driver: str = "selenium"  # "selenium" (bundles into the .exe/.app, drives installed Chrome) | "playwright"
     browser_platform: str = "projectx"  # "projectx" | "tradesea" (selector pack to use)
     browser_url_override: str = ""    # override the pack's URL if needed
     browser_tick_size: float = 0.25   # tick size for price math in browser mode (NQ/MNQ=0.25)
     browser_headless: bool = False    # MUST be False for manual login
     chrome_channel: str = "chrome"    # "chrome" (your installed Google Chrome) | "chromium" (bundled)
+
+    # --- Tradovate backend (non-secret; password/cid/sec live in the keyring only) ---
+    tdv_environment: str = "demo"     # "demo" | "live" — live ALSO requires tradovate.safety.LIVE_TRADING
+    tdv_username: str = ""            # Tradovate login name (NOT the password)
+    tdv_app_id: str = "Imbabot"       # app name registered with the Tradovate API key
+    tdv_device_id: str = ""           # stable uuid4 hex, auto-generated on first connect
+    tdv_account_spec: str = ""        # cached account name (Tradovate wants it in order payloads)
 
     # --- data / safety ---
     use_live_data: bool = False       # False = sim data subscription
@@ -223,6 +231,91 @@ def clear_api_key(username: str) -> None:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             data.pop(username, None)
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            pass
+
+
+# ----------------------------------------------------- Tradovate credentials
+# One JSON blob (password/cid/sec, optionally app_id) per username, stored under
+# its own keyring service. Same keyring -> 0600-file fallback as the API key;
+# the file entry is namespaced "tdv:<username>" inside the shared credentials
+# file. NEVER logged, never written to settings.json.
+_TDV_FILE_PREFIX = "tdv:"
+
+
+def store_tradovate_credentials(username: str, blob: dict) -> str:
+    """Persist the Tradovate secret blob. Returns 'keyring' or 'file'."""
+    payload = json.dumps(blob)
+    kr = _keyring()
+    if kr is not None:
+        try:
+            kr.set_password(KEYRING_SERVICE_TDV, username, payload)
+            return "keyring"
+        except Exception:
+            pass
+    path = _secret_file()
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data[_TDV_FILE_PREFIX + username] = payload
+    path.write_text(json.dumps(data), encoding="utf-8")
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    except Exception:
+        pass
+    return "file"
+
+
+def load_tradovate_credentials(username: str) -> Optional[dict]:
+    """Look up the Tradovate blob: env vars > keyring > local file."""
+    env_pw = os.environ.get("IMBABOT_TDV_PASSWORD")
+    if env_pw:
+        blob = {"password": env_pw}
+        cid = os.environ.get("IMBABOT_TDV_CID")
+        sec = os.environ.get("IMBABOT_TDV_SEC")
+        app_id = os.environ.get("IMBABOT_TDV_APPID")
+        if cid:
+            blob["cid"] = cid
+        if sec:
+            blob["sec"] = sec
+        if app_id:
+            blob["app_id"] = app_id
+        return blob
+    kr = _keyring()
+    if kr is not None:
+        try:
+            val = kr.get_password(KEYRING_SERVICE_TDV, username)
+            if val:
+                return json.loads(val)
+        except Exception:
+            pass
+    path = _secret_file()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            raw = data.get(_TDV_FILE_PREFIX + username)
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
+    return None
+
+
+def clear_tradovate_credentials(username: str) -> None:
+    kr = _keyring()
+    if kr is not None:
+        try:
+            kr.delete_password(KEYRING_SERVICE_TDV, username)
+        except Exception:
+            pass
+    path = _secret_file()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data.pop(_TDV_FILE_PREFIX + username, None)
             path.write_text(json.dumps(data), encoding="utf-8")
         except Exception:
             pass

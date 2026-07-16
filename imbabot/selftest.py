@@ -604,5 +604,60 @@ def run_selftest() -> int:
     _check("capture offset migration: stored 3 -> 1", migrated.capture_offset_seconds == 1,
            f"got {migrated.capture_offset_seconds}")
 
+    # 13) Tradovate second broker (0.2.5) — groundwork
+    # 13a) BrokerAdapter protocol: the duck-typed engine contract, pinned. If the
+    # engine ever grows a new client call, add it to broker.py and every backend.
+    from .broker import BrokerAdapter
+    from .projectx import ProjectXClient
+    _check("FakeClient conforms to BrokerAdapter", isinstance(FakeClient(), BrokerAdapter))
+    _check("ProjectXClient conforms to BrokerAdapter",
+           isinstance(ProjectXClient(), BrokerAdapter))
+
+    # 13b) Tradovate settings fields (non-secret) default sanely
+    s_tdv = Settings()
+    _check("tdv defaults: demo environment", s_tdv.tdv_environment == "demo",
+           f"got {s_tdv.tdv_environment}")
+    _check("tdv defaults: app id", s_tdv.tdv_app_id == "Imbabot")
+    _check("tdv defaults: no username/device", s_tdv.tdv_username == "" and s_tdv.tdv_device_id == "")
+
+    # 13c) credential blob round-trip via the 0600-file fallback. The real OS
+    # keyring is deliberately bypassed so the selftest never writes to the
+    # user's Windows Credential Manager.
+    from . import config as _cfg
+    _orig_keyring = _cfg._keyring
+    _cfg._keyring = lambda: None
+    try:
+        secret = {"password": "hunter-pass-x", "cid": 123, "sec": "sec-uuid-x"}
+        backend_used = _cfg.store_tradovate_credentials("selftest-user", secret)
+        _check("tdv store falls back to file", backend_used == "file", f"got {backend_used}")
+        blob = _cfg.load_tradovate_credentials("selftest-user")
+        _check("tdv credentials round-trip", blob == secret, f"got {blob}")
+        # settings.json must never carry the secrets
+        stext = Settings(tdv_username="selftest-user").save().read_text(encoding="utf-8")
+        _check("settings.json carries no tdv secrets",
+               "hunter-pass-x" not in stext and "sec-uuid-x" not in stext)
+        # tdv entries share the credentials file with the ProjectX key without clashing
+        _cfg.store_api_key("selftest-user", "px-key-x")
+        _check("tdv + projectx keys coexist in the file",
+               _cfg.load_api_key("selftest-user") == "px-key-x"
+               and _cfg.load_tradovate_credentials("selftest-user") == secret)
+        _cfg.clear_tradovate_credentials("selftest-user")
+        _cfg.clear_api_key("selftest-user")
+        _check("tdv credentials cleared",
+               _cfg.load_tradovate_credentials("selftest-user") is None)
+        # env override wins over stored values
+        os.environ["IMBABOT_TDV_PASSWORD"] = "env-pass-x"
+        os.environ["IMBABOT_TDV_CID"] = "77"
+        try:
+            blob2 = _cfg.load_tradovate_credentials("whoever")
+            _check("tdv env override wins",
+                   bool(blob2) and blob2.get("password") == "env-pass-x" and blob2.get("cid") == "77",
+                   f"got {blob2}")
+        finally:
+            del os.environ["IMBABOT_TDV_PASSWORD"]
+            del os.environ["IMBABOT_TDV_CID"]
+    finally:
+        _cfg._keyring = _orig_keyring
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
