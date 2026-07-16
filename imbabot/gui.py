@@ -55,6 +55,7 @@ GREEN_TINT = "#12281F"
 GREEN_TINT_BR = "#1F4D38"
 RED_TINT = "#2A1721"
 RED_TINT_BR = "#572733"
+INPUT_BG = "#0E1526"  # input field / log fill (darker than cards)
 # legacy HUD tones (HudHero is dormant; kept so the class still compiles)
 GLOW = "#1B2742"
 GRID = "#141D33"
@@ -318,33 +319,49 @@ class ImbabotGUI:
         for name, bg in (("TFrame", BG), ("Surface.TFrame", SURFACE), ("Card.TFrame", CARD),
                          ("Header.TFrame", BG)):
             st.configure(name, background=bg)
+        # cards read as panels: subtle 1px border on card + surface frames
+        st.configure("Card.TFrame", bordercolor=BORDER, relief="solid", borderwidth=1)
+        st.configure("Surface.TFrame", bordercolor=BORDER, relief="solid", borderwidth=1)
         st.configure("TLabel", background=BG, foreground=FG, font=(FONT, 11))
         st.configure("Muted.TLabel", background=BG, foreground=MUTED, font=(FONT, 10))
-        st.configure("Brand.TLabel", background=BG, foreground=ACCENT, font=(FONT, 21, "bold"))
+        st.configure("Brand.TLabel", background=BG, foreground=FG, font=(FONT, 19, "bold"))
         st.configure("Sub.TLabel", background=BG, foreground=MUTED, font=(FONT, 10))
         st.configure("H.TLabel", background=BG, foreground=FG, font=(FONT, 11, "bold"))
         st.configure("CardTitle.TLabel", background=CARD, foreground=MUTED, font=(FONT, 9, "bold"))
-        st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(FONT, 18, "bold"))
-        st.configure("CardBig.TLabel", background=CARD, foreground=ACCENT, font=(FONT, 34, "bold"))
+        st.configure("CardVal.TLabel", background=CARD, foreground=FG, font=(MONO, 18, "bold"))
+        st.configure("CardBig.TLabel", background=CARD, foreground=FG, font=(MONO, 30, "bold"))
         st.configure("Banner.TLabel", background=BG, foreground=MUTED, font=(FONT, 11, "bold"))
+        # semantic tinted stat cells (Morning Plan TP/SL): colored value on faint tinted field
+        st.configure("TintGreen.TFrame", background=GREEN_TINT, bordercolor=GREEN_TINT_BR,
+                     relief="solid", borderwidth=1)
+        st.configure("TintRed.TFrame", background=RED_TINT, bordercolor=RED_TINT_BR,
+                     relief="solid", borderwidth=1)
+        st.configure("TintTitleG.TLabel", background=GREEN_TINT, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("TintValG.TLabel", background=GREEN_TINT, foreground=GREEN_H, font=(MONO, 20, "bold"))
+        st.configure("TintTitleR.TLabel", background=RED_TINT, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("TintValR.TLabel", background=RED_TINT, foreground=RED_H, font=(MONO, 20, "bold"))
+        st.configure("CellTitle.TLabel", background=ELEV, foreground=MUTED, font=(FONT, 9, "bold"))
+        st.configure("CellVal.TLabel", background=ELEV, foreground=FG, font=(MONO, 20, "bold"))
+        st.configure("Cell.TFrame", background=ELEV, bordercolor=BORDER, relief="solid", borderwidth=1)
         # header live ticker (NQ)
         st.configure("TickSym.TLabel", background=ELEV, foreground=FG, font=(FONT, 10, "bold"), padding=(9, 4))
         st.configure("TickPrice.TLabel", background=BG, foreground=FG, font=(MONO, 15, "bold"))
         st.configure("TickUp.TLabel", background=BG, foreground=GREEN_H, font=(FONT, 10, "bold"))
         st.configure("TickDown.TLabel", background=BG, foreground=RED_H, font=(FONT, 10, "bold"))
         st.configure("TickFlat.TLabel", background=BG, foreground=MUTED, font=(FONT, 10, "bold"))
-        # pills
-        for nm, bg, fg in (("Pill.Sec.TLabel", ELEV, MUTED), ("Pill.Ok.TLabel", GREEN, "#ffffff"),
-                           ("Pill.Bad.TLabel", RED, "#ffffff"), ("Pill.Warn.TLabel", AMBER, "#0d1117")):
-            st.configure(nm, background=bg, foreground=fg, font=(FONT, 9, "bold"), padding=(11, 5))
+        # pills — softer "status chip" look: tinted fills with colored text (not solid saturated)
+        for nm, bg, fg in (("Pill.Sec.TLabel", ELEV, MUTED), ("Pill.Ok.TLabel", GREEN_TINT, GREEN_H),
+                           ("Pill.Bad.TLabel", RED_TINT, RED_H), ("Pill.Warn.TLabel", AMBER, "#0B1120")):
+            st.configure(nm, background=bg, foreground=fg, font=(FONT, 9, "bold"), padding=(12, 6))
         # inputs
-        st.configure("TEntry", fieldbackground="#06141d", foreground=FG, insertcolor=FG,
-                     bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=6)
-        st.map("TEntry", bordercolor=[("focus", ACCENT)],
+        st.configure("TEntry", fieldbackground=INPUT_BG, foreground=FG, insertcolor=FG,
+                     bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=7)
+        st.map("TEntry", bordercolor=[("focus", ACCENT)], lightcolor=[("focus", ACCENT)],
+               darkcolor=[("focus", ACCENT)],
                foreground=[("disabled", MUTED)], fieldbackground=[("disabled", BG)])
-        st.configure("TCombobox", fieldbackground="#06141d", background=SURFACE, foreground=FG,
-                     arrowcolor=MUTED, bordercolor=BORDER, padding=5)
-        st.map("TCombobox", fieldbackground=[("readonly", "#06141d")], foreground=[("readonly", FG)])
+        st.configure("TCombobox", fieldbackground=INPUT_BG, background=SURFACE, foreground=FG,
+                     arrowcolor=MUTED, bordercolor=BORDER, padding=6)
+        st.map("TCombobox", fieldbackground=[("readonly", INPUT_BG)], foreground=[("readonly", FG)])
         st.configure("TCheckbutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
         st.map("TCheckbutton", background=[("active", BG)], indicatorcolor=[("selected", ACCENT)])
         st.configure("TRadiobutton", background=BG, foreground=FG, font=(FONT, 10), focuscolor=BG)
@@ -353,24 +370,25 @@ class ImbabotGUI:
         st.configure("TSeparator", background=BORDER)
         st.configure("Vertical.TScrollbar", background=ELEV, troughcolor=BG, bordercolor=BG,
                      arrowcolor=MUTED)
-        # notebook
-        st.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(2, 6, 2, 0))
-        st.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(18, 9),
+        # notebook — underline-style tabs: flat, muted; selected = white text on a subtly
+        # elevated fill with an accent bottom edge (approximated via a colored underline border)
+        st.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(2, 8, 2, 0))
+        st.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(20, 10),
                      font=(FONT, 10, "bold"), borderwidth=0)
-        st.map("TNotebook.Tab", background=[("selected", SURFACE)], foreground=[("selected", FG)],
-               expand=[("selected", (0, 0, 0, 0))])
-        # buttons
-        self._btn_style(st, "Accent.TButton", ACCENT, ACCENT_H)
-        self._btn_style(st, "Success.TButton", GREEN, GREEN_H)
+        st.map("TNotebook.Tab", background=[("selected", SURFACE)], foreground=[("selected", ACCENT)],
+               expand=[("selected", (0, 0, 0, 2))])
+        # buttons — semantic fills: ARM=green, FLATTEN=amber, STOP=red, Save/primary=cyan
+        self._btn_style(st, "Accent.TButton", ACCENT, ACCENT_H, fg="#0B1120")
+        self._btn_style(st, "Success.TButton", GREEN, GREEN_H, fg="#0B1120")
         self._btn_style(st, "Danger.TButton", RED, RED_H)
-        self._btn_style(st, "Warning.TButton", AMBER, AMBER_H, fg="#0d1117")
+        self._btn_style(st, "Warning.TButton", AMBER, AMBER_H, fg="#0B1120")
         self._btn_style(st, "Ghost.TButton", ELEV, BORDER, fg=FG, small=True)
         self.st = st
 
     def _btn_style(self, st, name, bg, hover, fg="#ffffff", small=False):
         st.configure(name, background=bg, foreground=fg, font=(FONT, 10 if small else 11, "bold"),
                      borderwidth=0, relief="flat", focuscolor=bg,
-                     padding=(12, 7) if small else (20, 11))
+                     padding=(14, 8) if small else (22, 12))
         st.map(name, background=[("active", hover), ("pressed", hover), ("disabled", ELEV)],
                foreground=[("disabled", MUTED)])
 
@@ -479,7 +497,7 @@ class ImbabotGUI:
         self.btn_log_toggle.pack(side="left")
         ttk.Button(topbar, text="Save log…", command=self._on_save_log, style="Ghost.TButton").pack(side="right")
         self.txt = tk.Text(self._logwrap, height=9, wrap="word", relief="flat", borderwidth=0,
-                           background="#06141d", foreground=FG, insertbackground=FG,
+                           background=INPUT_BG, foreground=FG, insertbackground=FG,
                            font=(MONO, 10), padx=12, pady=10, highlightthickness=0)
         self.txt.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
         self._log_sb = ttk.Scrollbar(self._logwrap, command=self.txt.yview)
