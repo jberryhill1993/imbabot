@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Imbabot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+
+  <!-- ═══════════ Row 1 · top bar ═══════════ -->
+  <header class="card topbar">
+    <div class="brand">
+      <span class="name">◆ IMBABOT</span>
+      <span class="ver" id="ver">v0.2.3-dev · TopstepX opening-range bot</span>
+    </div>
+    <div class="tick">
+      <span class="sym">NQ</span>
+      <span class="px num" id="nq-px">29,831.00</span>
+      <span class="chg up num" id="nq-chg">▲ +74.25 (+0.25%)</span>
+    </div>
+    <div class="tick">
+      <span class="sym">VIX</span>
+      <span class="px num" id="vix-px">15.74</span>
+      <span class="chg down num" id="vix-chg">▼ −0.10 (−0.63%)</span>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill ok" id="pill-conn"><span class="dot green"></span>CONNECTED</span>
+    <span class="pill bad" id="pill-live"><span class="dot red pulse"></span>LIVE</span>
+    <span class="pill" id="pill-armed"><span class="dot gray"></span>DISARMED</span>
+  </header>
+
+  <!-- ═══════════ Row 2 · hero stat cards ═══════════ -->
+  <section class="stats">
+    <div class="card stat">
+      <div class="section-label">T-minus to market open</div>
+      <div class="value hero num" id="stat-tminus">23:59:51</div>
+    </div>
+    <div class="card stat">
+      <div class="section-label">Next fire</div>
+      <div class="value num" id="stat-fire">08:29:59</div>
+      <div class="sub">daily · Mon–Fri · holidays skipped</div>
+    </div>
+    <div class="card stat">
+      <div class="section-label">Last price</div>
+      <div class="value num" id="stat-price">29,835.00</div>
+    </div>
+    <div class="card stat">
+      <div class="section-label">Overnight range</div>
+      <div class="value num" id="stat-range">29,683.0–30,011.2</div>
+    </div>
+  </section>
+
+  <!-- ═══════════ Row 3 · action bar ═══════════ -->
+  <section class="card actions">
+    <button class="btn-arm" id="btn-arm">ARM</button>
+    <span class="mode-note" id="mode-note">● LIVE — REAL ORDERS</span>
+    <div class="spacer"></div>
+    <button class="btn-flatten" id="btn-flatten">▽ FLATTEN</button>
+    <button class="btn-stop" id="btn-stop">■ EMERGENCY STOP</button>
+  </section>
+
+  <!-- ═══════════ Row 4 · tabbed main card ═══════════ -->
+  <section class="card">
+    <div class="tabbar">
+      <button class="tab active" data-tab="connect">Connect</button>
+      <button class="tab" data-tab="strategy">Strategy</button>
+      <button class="tab" data-tab="test">Test</button>
+    </div>
+
+    <!-- ── Connect ── -->
+    <div class="tabpane active" id="pane-connect">
+      <div class="grid2">
+        <div>
+          <div class="field"><label>Backend</label>
+            <div class="segment" id="seg-backend">
+              <button class="active">API (TopstepX)</button><button>Browser</button>
+            </div>
+          </div>
+          <div class="field"><label>Platform</label>
+            <select><option>projectx</option><option>tradesea</option></select>
+          </div>
+          <div class="field"><label>Base URL</label><input type="text" value="https://api.topstepx.com"></div>
+          <div class="field"><label>Username</label><input type="text" value="trader@example.com"></div>
+          <div class="field"><label>API key</label><input type="password" value="••••••••••••" autocomplete="off"></div>
+          <div class="toggle-row"><span>Remember on this device</span>
+            <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+          </div>
+        </div>
+        <div>
+          <div class="field"><label>Account</label>
+            <select><option>PRAC-V2-575271 ($150K PRACTICE)</option></select>
+          </div>
+          <div class="field"><label>Symbol</label><input type="text" class="short" value="NQU6"></div>
+          <div style="margin-top:14px"><button class="btn-primary">Connect</button>
+            <span style="margin-left:12px;font-size:12px" class="up">✓ connected · NQU6 tick 0.25 · $5/tick</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Strategy ── -->
+    <div class="tabpane" id="pane-strategy">
+      <div class="grid2">
+        <div>
+          <div class="field"><label>Entry points (±)</label><input type="number" class="short" value="10.0"></div>
+          <div class="field"><label>Stop-loss points <span class="hint">(bot-managed)</span></label>
+            <span style="display:flex;align-items:center;gap:10px">
+              <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+              <input type="number" class="short" value="12.0">
+            </span>
+          </div>
+          <div class="field"><label>Take-profit points <span class="hint">(bot-managed)</span></label>
+            <span style="display:flex;align-items:center;gap:10px">
+              <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+              <input type="number" class="short" value="12.0">
+            </span>
+          </div>
+          <div class="field"><label>Contracts</label><input type="number" class="short" value="4"></div>
+          <div class="field"><label>Fire daily at (HH:MM:SS)</label><input type="text" class="short" value="08:29:59"></div>
+          <div style="margin-top:12px;display:flex;gap:10px">
+            <button class="btn-primary">Save settings</button>
+            <button class="btn-ghost">💾 Save &amp; arm daily (Mon–Fri)</button>
+          </div>
+        </div>
+        <div>
+          <div class="section-label" style="margin-bottom:8px">Mode</div>
+          <div class="toggle-row"><span>One-Trade (auto OCO)<span class="hint">first fill cancels the other leg</span></span>
+            <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row"><span>DRY-RUN (no real orders)<span class="hint">compute &amp; log only</span></span>
+            <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row"><span>Stop-limit entries (cap slippage)<span class="hint">limit offset, ticks:</span></span>
+            <span style="display:flex;align-items:center;gap:10px">
+              <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+              <input type="number" class="short" value="4" style="width:70px">
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Test ── -->
+    <div class="tabpane" id="pane-test">
+      <div class="field" style="max-width:560px"><label>Test mode: fire at a custom time (instead of 9:30)</label>
+        <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+      </div>
+      <div class="field" style="max-width:560px"><label>Fire at (HH:MM:SS, 24-hour) — your computer's clock</label>
+        <input type="text" class="short" value="19:50:00">
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px">
+        <button class="btn-flatten">⚡ Fire TEST now</button>
+        <button class="btn-ghost">💾 Save &amp; schedule auto-fire</button>
+      </div>
+      <p class="mp-meta" style="max-width:640px">Use a SIM / practice account. The bot fires off your computer's
+        clock in 24-hour format. Enter a time, click Save &amp; schedule, and it auto-fires then. DISARM cancels.
+        Honors dry-run.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════ Row 5 · Morning Plan ═══════════ -->
+  <section class="card">
+    <div class="card-title"><span class="dot green"></span>Morning Plan
+      <span style="font-size:11px;color:var(--text-muted);font-weight:400">— tick-data · advisory; the bot never changes your settings</span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn-primary" id="btn-recalc">↻ Recalculate now</button>
+    </div>
+
+    <div class="mp-summary num" id="mp-status">
+      ✅ TRADE · MODERATE · Session: Mon Jul 13 · Vol MEDIUM · spike ~21pt · P(30+)=20%
+    </div>
+
+    <div class="field" style="max-width:520px;margin-top:8px">
+      <label>Profit target $ <span class="hint">(drives the TopStep inputs below on Recalculate; capped at 5 contracts)</span></label>
+      <input type="number" class="short" value="550">
+    </div>
+
+    <div class="mp-headline" style="margin-top:10px">➡ ENTER IN TOPSTEP</div>
+    <div class="mp-cells">
+      <div class="tile"><div class="section-label">Contracts</div><div class="value num">4</div></div>
+      <div class="tile"><div class="section-label">Entry (pts)</div><div class="value num">±10</div></div>
+      <div class="tile green"><div class="section-label">Take-Profit</div><div class="value num">$552</div></div>
+      <div class="tile red"><div class="section-label">Stop-Loss</div><div class="value num">$480</div></div>
+    </div>
+
+    <div class="mp-alert" id="mp-alert" style="display:none">⚠ Your $2,000 target needs ~11 contracts — capped at 5.</div>
+
+    <div class="mp-meta">
+      Sized to your $550 target — TP 9pt, reachable inside the ~1-second opening spike.<br>
+      Today's MAX at 5 contracts: Take-Profit $690 · Stop-Loss $800.<br>
+      VIX 15.7 (prior close) · Gap 106pt · News: none<br>
+      Predicted opening spike ~21 pts (P(30+)=20%). Sized to hit $550. Note: spike SIZE is predictable;
+      the win/loss on any single day is not — respect the stop.
+    </div>
+  </section>
+
+  <!-- ═══════════ Bottom · activity log ═══════════ -->
+  <section class="card log-card" id="log-card">
+    <div class="log-head" id="log-head">
+      <span class="chev">▶</span>
+      <span class="card-title" style="margin:0"><span class="dot gray"></span>Activity log</span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn-ghost" id="btn-savelog">Save log…</button>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </section>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
