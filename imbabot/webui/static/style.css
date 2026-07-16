@@ -117,10 +117,10 @@ body {
 }
 .tick .sym { font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; }
 .tick .px { font-size: 15px; font-weight: 700; }
-/* change block: points on top, (%) directly beneath — one compact stack right of the price */
-.tick .chg { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+/* change readout: SYM · price · points · (%) — everything on ONE line, left to right */
+.tick .chg { display: flex; flex-direction: row; align-items: baseline; gap: 6px; }
 .tick .chg-pts { font-size: 12px; font-weight: 700; }
-.tick .chg-pct { font-size: 11px; font-weight: 600; opacity: 0.9; }
+.tick .chg-pct { font-size: 12px; font-weight: 600; opacity: 0.9; }
 .up { color: var(--green); }
 .down { color: var(--red); }
 .flat { color: var(--text-muted); }
