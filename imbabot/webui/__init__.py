@@ -20,7 +20,7 @@ def _static_dir() -> Path:
 
 
 def run_webui() -> int:
-    """Open the dashboard window. Phase 1: no bridge — the page uses placeholder data."""
+    """Open the dashboard window with the js_api bridge attached (Phase 2)."""
     try:
         import webview
     except ImportError:
@@ -30,10 +30,14 @@ def run_webui() -> int:
         return classic_main()
 
     from .. import __version__
+    from .bridge import Api
+
+    api = Api()
     index = _static_dir() / "index.html"
-    webview.create_window(
+    window = webview.create_window(
         f"Imbabot {__version__}",
         index.as_uri(),
+        js_api=api,
         width=1280,
         height=860,
         # 980x720 floor: 980 sits inside the <=1100px breakpoint (stats 2x2, single-column
@@ -42,5 +46,6 @@ def run_webui() -> int:
         min_size=(980, 720),
         background_color="#0A0F1E",
     )
+    window.events.closing += api.shutdown   # disarm + stop threads, same as gui.on_close
     webview.start()
     return 0
