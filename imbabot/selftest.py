@@ -1057,6 +1057,62 @@ def run_selftest() -> int:
     except tdv_safety.SafetyError as exc:
         _check("tdv kill switch blocks new orders", "Kill switch" in str(exc))
 
+    # 13g3) reference-price source — the no-CME-license route (order routing
+    # needs no data license; only streaming Tradovate quotes does, ~$290/mo).
+    from .tradovate.pricefeed import ReferencePriceFeed
+    _check("tdv price source default == topstep",
+           Settings().tdv_price_source == "topstep")
+
+    class _PxStub:
+        authenticated = True
+        def resolve_contract(self, symbol, live=False):
+            return type("C", (), {"id": "PX1", "name": symbol + "Z6"})()
+        def last_price(self, cid, live=False):
+            return 21042.5
+
+    class _PxDead:
+        authenticated = True
+        def resolve_contract(self, *a, **k):
+            raise RuntimeError("px down")
+
+    s_pf = Settings(backend="tradovate", tdv_price_source="topstep",
+                    username="u", contract_symbol="MNQ")
+    feed = ReferencePriceFeed(s_pf, px_client=_PxStub(), quote_fn=lambda: 99999.0)
+    _check("tdv feed: TopStep source preferred",
+           feed.last_price() == 21042.5 and feed.last_source == "topstep")
+    feed2 = ReferencePriceFeed(s_pf, px_client=_PxDead(), quote_fn=lambda: 21050.0)
+    _check("tdv feed: falls back to the public quote",
+           feed2.last_price() == 21050.0 and feed2.last_source == "public")
+    feed3 = ReferencePriceFeed(s_pf, px_client=_PxDead(), quote_fn=lambda: None)
+    try:
+        feed3.last_price()
+        _check("tdv feed: both sources dead raises", False, "no exception")
+    except RuntimeError:
+        _check("tdv feed: both sources dead raises", True)
+    px_calls = []
+    class _PxBoom:
+        authenticated = True
+        def resolve_contract(self, *a, **k):
+            px_calls.append(1)
+            raise RuntimeError("must not be called")
+    feed4 = ReferencePriceFeed(Settings(backend="tradovate", tdv_price_source="public"),
+                               px_client=_PxBoom(), quote_fn=lambda: 21060.0)
+    _check("tdv feed: public source never touches TopStep",
+           feed4.last_price() == 21060.0 and not px_calls)
+
+    # client dispatch: topstep source serves the price with the MD socket OFF
+    warns_pf = []
+    s_cd = Settings(backend="tradovate", tdv_username="u", tdv_price_source="topstep")
+    cl_pf = TradovateClient(s_cd, log=lambda m, level="info": warns_pf.append(m),
+                            http=_Rest(), enable_ws=False)
+    cl_pf.authenticate("u", "pw")
+    cl_pf._price_feed = ReferencePriceFeed(s_cd, px_client=_PxStub(),
+                                           quote_fn=lambda: None)
+    _check("tdv client: topstep price source works without the MD socket",
+           cl_pf._md_ws is None and cl_pf.last_price("any-id") == 21042.5)
+    _check("tdv banner states the price source",
+           any("price_src=topstep" in m for m in warns_pf))
+
     # 13h) engine E2E on the Tradovate translation layer (FakeTradovate):
     # full fire -> OCO cancel -> panic, exercising signed netPos + OSO shapes.
     from ._fake_tradovate import FakeTradovate

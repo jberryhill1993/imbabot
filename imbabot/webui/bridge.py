@@ -38,6 +38,7 @@ _SETTINGS_FIELDS = [
     ("use_live_data", bool), ("dry_run", bool),
     # Tradovate (non-secret; password/cid/sec travel via connect()'s tdv_secrets)
     ("tdv_environment", str), ("tdv_username", str), ("tdv_app_id", str),
+    ("tdv_price_source", str),
 ]
 
 

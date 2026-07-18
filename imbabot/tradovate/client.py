@@ -117,6 +117,11 @@ class TradovateClient:
         # Transient credentials for THIS session only (UI passes cid/sec here when
         # the user declines "remember" — nothing touches the keyring/disk).
         self.session_secrets: Dict[str, Any] = {}
+        # Reference-price feed for the no-CME-license sources (lazily built).
+        self._price_feed: Any = None
+
+    def _price_source(self) -> str:
+        return getattr(self._settings, "tdv_price_source", "topstep") or "topstep"
 
     # ------------------------------------------------------------ plumbing
     def _base_url(self) -> str:
@@ -229,6 +234,7 @@ class TradovateClient:
             f"TRADOVATE CONNECTED — env={self._env.upper()} "
             f"endpoint={self._base_url().split('//')[1].split('/')[0]} "
             f"LIVE_TRADING={safety.LIVE_TRADING} dry_run={dry} "
+            f"price_src={self._price_source()} "
             f"venue_caps={'off (TopStep-parity guards)' if cap is None and loss is None else f'max_pos={cap} max_daily_loss=${loss}'}",
             "warning" if self._env == "live" else "info",
         )
@@ -247,14 +253,22 @@ class TradovateClient:
     def _connect_sockets(self) -> None:
         from . import ws
 
-        base = self._base_url()
+        # User-sync socket ALWAYS opens — fills/orders/positions need no data
+        # license (only the API Access add-on).
         self._user_ws = ws.TdvSocket(
             ws.user_ws_url(self._env), self._tokens, kind="user",
             log=self._log, on_kill=self._trip_kill)
         self._user_ws.start()
-        self._md_ws = ws.TdvSocket(
-            ws.md_ws_url(self._env), self._tokens, kind="md", log=self._log)
-        self._md_ws.start()
+        # MD socket only when the user actually licensed Tradovate quotes
+        # (CME sub-vendor, ~$290/mo). Default: reference price via the
+        # TopStep feed / public quote (pricefeed.py) — no md auth noise.
+        if self._price_source() == "tradovate":
+            self._md_ws = ws.TdvSocket(
+                ws.md_ws_url(self._env), self._tokens, kind="md", log=self._log)
+            self._md_ws.start()
+        else:
+            self._log("Tradovate MD socket skipped — reference price comes from "
+                      f"the {self._price_source()} source (no CME license needed).")
 
     def _trip_kill(self, reason: str) -> None:
         """Daily-loss kill switch: block orders, sweep the book, liquidate."""
@@ -388,6 +402,14 @@ class TradovateClient:
 
     # ---------------------------------------------------------- market data
     def last_price(self, contract_id: str, live: bool = False) -> float:
+        if self._price_source() != "tradovate":
+            if self._price_feed is None:
+                from .pricefeed import ReferencePriceFeed
+                self._price_feed = ReferencePriceFeed(self._settings, self._log)
+            try:
+                return self._price_feed.last_price()
+            except Exception as exc:
+                raise TradovateError(str(exc)) from exc
         info = self._contract_info(contract_id)
         if self._md_ws is None:
             raise TradovateError("Market-data socket not connected.")
@@ -395,8 +417,8 @@ class TradovateClient:
         price = self._md_ws.quotes.last_price(info["name"])
         if price is None:
             raise TradovateError(
-                f"No fresh Tradovate quote for {info['name']} (check the CME "
-                f"market-data subscription on the API).")
+                f"No fresh Tradovate quote for {info['name']} (tdv_price_source="
+                f"'tradovate' needs the CME sub-vendor license on this API key).")
         return price
 
     def session_range(self, contract_id, start, end, live: bool = False):

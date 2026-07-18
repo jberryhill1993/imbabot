@@ -120,8 +120,16 @@
             <div class="field"><label>API key cid</label><input type="text" class="short" id="f-tdv-cid" autocomplete="off"></div>
             <div class="field"><label>API key secret</label><input type="password" id="f-tdv-sec" autocomplete="off"
                  placeholder="enter the API secret"></div>
-            <div class="mp-meta">Needs the Tradovate <b>API Access</b> add-on (cid + secret) and a CME
-              market-data subscription for API usage. Demo endpoint by default.</div>
+            <div class="field"><label>Price source</label>
+              <select id="f-tdv-price">
+                <option value="topstep">TopStep feed (default — no CME license)</option>
+                <option value="tradovate">Tradovate data (needs $290/mo CME sub-vendor)</option>
+                <option value="public">Public NQ feed only</option>
+              </select>
+            </div>
+            <div class="mp-meta">Needs the Tradovate <b>API Access</b> add-on (cid + secret).
+              Order routing needs no CME data license — only the "Tradovate data" price source does.
+              Demo endpoint by default.</div>
           </div>
           <div class="toggle-row"><span>Remember on this device</span>
             <label class="switch"><input type="checkbox" id="f-remember" checked><span class="slider"></span></label>

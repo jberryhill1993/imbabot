@@ -57,6 +57,7 @@ function collectSettings() {
     dry_run: $("f-dry").checked,
     tdv_environment: tdvEnv,
     tdv_username: $("f-tdv-user").value.trim(),
+    tdv_price_source: $("f-tdv-price").value,
   };
 }
 
@@ -383,6 +384,7 @@ async function init() {
   $("f-test-mode").checked = s.test_mode;
   $("f-test-time").value = s.test_fire_time;
   $("f-tdv-user").value = s.tdv_username || "";
+  $("f-tdv-price").value = s.tdv_price_source || "topstep";
   tdvEnv = s.tdv_environment || "demo";
   document.querySelectorAll("#seg-tdvenv button").forEach((b) =>
     b.classList.toggle("active", b.dataset.val === tdvEnv));

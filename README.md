@@ -258,19 +258,28 @@ SL/TP toggles ON for Tradovate — a naked entry there is truly naked (the bot
 warns loudly). Also set Tradovate's own account risk settings as the
 platform-side backstop.
 
-**Data.** Fills/orders/positions arrive over Tradovate's user-sync WebSocket;
-quotes over the market-data WebSocket (requires a CME market-data subscription
-valid for API usage). The overnight-range panel and history probes are not
-supported on this backend yet (0.2.5 limitation — the Morning Plan analyzer
-stays Databento-backed and works regardless of backend).
+**Data — read this before buying anything.** Two very different CME items exist:
+the retail CME Bundle (~$39/mo) licenses quotes **inside the Tradovate app
+only**; streaming quotes **through the API** requires CME *sub-vendor
+registration* (~$290/mo paid to CME, post-2022 ruling). **Order routing needs
+no data license at all.** The bot only needs one price from the data path — the
+reference captured ~1s before the open — so the default "Price source" is
+**topstep**: the same TopStep/ProjectX feed the validated forward-test used
+(your stored TopStep API key), with the public NQ quote as automatic fallback.
+No CME license, no extra cost. Choose "tradovate" only if you actually register
+as a CME sub-vendor. Fills/orders/positions always arrive over the user-sync
+WebSocket (covered by plain API Access). The overnight-range panel and history
+probes are not supported on this backend yet (0.2.5 limitation — the Morning
+Plan analyzer stays Databento-backed and works regardless of backend).
 
 ### Tradovate onboarding (one-time, before the demo check)
 1. Tradovate account that can log in at trader.tradovate.com (demo is fine).
 2. Buy the **API Access** add-on (Application Settings → API Access, ~$25/mo).
 3. Generate an API key there: record the **cid** and **secret**; register the
    app name (default `Imbabot`).
-4. Add the **CME market-data subscription** for API usage (quotes won't flow
-   without it).
+4. *(Optional — only for Price source "tradovate")* Register as a **CME
+   sub-vendor** (~$290/mo). The default "topstep" price source needs nothing
+   here beyond your existing stored TopStep API key.
 5. Log in once via the Tradovate website from the computer that will run the
    bot (satisfies device/captcha verification so API logins aren't challenged).
 6. In Imbabot's Connect tab pick **Tradovate**, enter username / password /

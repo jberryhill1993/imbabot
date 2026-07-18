@@ -125,6 +125,11 @@ class Settings:
     tdv_app_id: str = "Imbabot"       # app name registered with the Tradovate API key
     tdv_device_id: str = ""           # stable uuid4 hex, auto-generated on first connect
     tdv_account_spec: str = ""        # cached account name (Tradovate wants it in order payloads)
+    # Reference-price source for the Tradovate backend. "topstep" (default) =
+    # the existing ProjectX feed + public-quote fallback (NO CME license needed;
+    # order routing never needs one). "tradovate" = the MD WebSocket — requires
+    # the ~$290/mo CME sub-vendor registration. "public" = public NQ quote only.
+    tdv_price_source: str = "topstep"  # "topstep" | "tradovate" | "public"
 
     # --- data / safety ---
     use_live_data: bool = False       # False = sim data subscription

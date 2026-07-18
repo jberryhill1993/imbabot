@@ -49,6 +49,16 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
 - Dependency: `websocket-client>=1.7`. Selftest: 121 → **215** checks, all
   offline.
 
+### Added — pluggable reference-price source (skip the $290/mo CME fee)
+- Verified: real-time CME data over the Tradovate API needs CME sub-vendor
+  registration (~$290/mo to CME; the $39 retail bundle does NOT cover API) —
+  but ORDER ROUTING needs no data license. New `tdv_price_source` setting:
+  **"topstep"** (default — reference price from the existing ProjectX feed via
+  the stored TopStep key, public NQ quote fallback; `tradovate/pricefeed.py`),
+  "tradovate" (MD WebSocket, for licensed accounts), "public". The MD socket
+  only opens for "tradovate"; the user-sync socket always runs. Both UIs gain
+  a Price source selector; demo check is source-aware.
+
 ### Notes
 - `session_range`/`retrieve_bars` are not yet supported on the Tradovate
   backend (dashboard shows “—”; the Morning Plan is Databento-backed and

@@ -665,11 +665,19 @@ class ImbabotGUI:
         _tdv_field("Password", self.var_tdv_pass, 2, show="•", width=34)
         _tdv_field("API key cid", self.var_tdv_cid, 3, width=14)
         _tdv_field("API key secret", self.var_tdv_sec, 4, show="•", width=38)
+        ttk.Label(self.frm_tdv, text="Price source", style="Sm.TLabel").grid(
+            row=5, column=0, sticky="w", pady=4)
+        self.var_tdv_price = tk.StringVar(value=self.settings.tdv_price_source)
+        ttk.Combobox(self.frm_tdv, state="readonly", width=12,
+                     values=["topstep", "tradovate", "public"],
+                     textvariable=self.var_tdv_price, font=(FONT, 11)).grid(
+            row=5, column=1, sticky="w", padx=8)
         ttk.Label(self.frm_tdv, style="Hint.TLabel", wraplength=560,
-                  text="Needs the Tradovate API Access add-on (cid + secret) and a CME "
-                       "market-data subscription for API usage. LIVE stays locked until "
-                       "safety.py LIVE_TRADING is enabled in source.").grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+                  text="Needs the Tradovate API Access add-on (cid + secret). Order routing "
+                       "needs NO CME data license — only the 'tradovate' price source does "
+                       "(~$290/mo CME sub-vendor); 'topstep' (default) reuses your TopStep "
+                       "feed. LIVE stays locked until safety.py LIVE_TRADING is enabled.").grid(
+            row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.frm_tdv.grid_remove()
 
     def _build_tab_strategy(self, nb) -> None:
@@ -892,6 +900,7 @@ class ImbabotGUI:
             s.dry_run = bool(self.var_dry.get())
             s.tdv_environment = self.var_tdv_env.get().strip() or "demo"
             s.tdv_username = self.var_tdv_user.get().strip()
+            s.tdv_price_source = self.var_tdv_price.get().strip() or "topstep"
         except ValueError as exc:
             messagebox.showerror("Invalid input", f"Check the strategy numbers: {exc}")
             return None

@@ -6,9 +6,12 @@ endpoint (TradovateClient refuses live while safety.LIVE_TRADING is False).
 
 Prerequisites (see README "Tradovate onboarding"):
   1. Tradovate demo account + the API Access add-on (cid + sec generated).
-  2. CME market-data subscription valid for API usage.
-  3. Credentials stored: either connect once in the app with "Remember", or set
+  2. Credentials stored: either connect once in the app with "Remember", or set
      IMBABOT_TDV_USER / IMBABOT_TDV_PASSWORD / IMBABOT_TDV_CID / IMBABOT_TDV_SEC.
+  3. Reference price (step 4) follows Settings.tdv_price_source:
+     - "topstep" (default): needs your TopStep API key stored (no CME license);
+     - "tradovate": needs the ~$290/mo CME sub-vendor registration;
+     - "public": nothing extra.
 
 Run:
   python scripts/tdv_demo_check.py            # uses stored/env credentials
@@ -85,13 +88,20 @@ def main() -> int:
     check("1 auth: validate() self-heals", cl.validate())
 
     # 2 — sockets
+    src = s.tdv_price_source or "topstep"
     deadline = time.time() + 15
     while time.time() < deadline and not (cl._user_ws and cl._user_ws.healthy):
         time.sleep(0.5)
     check("2 user socket healthy + synced", bool(cl._user_ws and cl._user_ws.healthy))
-    while time.time() < deadline and not (cl._md_ws and cl._md_ws.healthy):
-        time.sleep(0.5)
-    check("2 MD socket healthy", bool(cl._md_ws and cl._md_ws.healthy))
+    if src == "tradovate":
+        while time.time() < deadline and not (cl._md_ws and cl._md_ws.healthy):
+            time.sleep(0.5)
+        check("2 MD socket healthy", bool(cl._md_ws and cl._md_ws.healthy),
+              "no CME sub-vendor license on this API key? Either register with "
+              "CME or set Price source to 'topstep'")
+    else:
+        check(f"2 MD socket skipped (price source = {src}, no CME license needed)",
+              cl._md_ws is None)
 
     accounts = cl.search_accounts()
     check("2 accounts listed", len(accounts) >= 1,
@@ -108,18 +118,27 @@ def main() -> int:
         check("3 MNQ tick math", con.tick_size == 0.25 and con.tick_value == 0.5,
               f"{con.tick_size}/{con.tick_value}")
 
-    # 4 — quote
+    # 4 — reference price (source-aware)
     price = None
+    last_err = ""
     deadline = time.time() + 15
     while time.time() < deadline:
         try:
             price = cl.last_price(con.id)
             break
-        except Exception:
+        except Exception as exc:
+            last_err = str(exc)
             time.sleep(1.0)
-    check("4 fresh quote received", price is not None,
-          "no quote in 15s — is the CME market-data subscription active for API?")
-    print(f"    last price {price}")
+    if src == "tradovate":
+        detail = ("no quote in 15s — the 'tradovate' price source needs the "
+                  "~$290/mo CME sub-vendor registration; either register or set "
+                  "Price source to 'topstep'")
+    else:
+        detail = (f"no price in 15s via the '{src}' source — {last_err}")
+    check("4 reference price received", price is not None, detail)
+    served_by = (cl._price_feed.describe() if (src != "tradovate" and cl._price_feed)
+                 else "Tradovate MD socket")
+    print(f"    reference price {price} (source: {served_by})")
 
     # 5 — far-from-market OSO (1 lot, brackets, will never fill)
     from imbabot.models import StraddleLeg
