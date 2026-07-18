@@ -881,14 +881,14 @@ def run_selftest() -> int:
     _check("tdv position shape reads correctly in the engine",
            _npv(pp[0]) == -1, f"got {_npv(pp[0])}")
 
-    # hard size guard (defense-in-depth under RiskGuard)
-    try:
-        cl.place_order(account_id=7001, contract_id=con.id,
-                       order_type=OrderType.MARKET, side=OrderSide.BUY,
-                       size=tdv_safety.MAX_POSITION_SIZE + 1)
-        _check("tdv hard size cap refuses", False, "no exception")
-    except tdv_safety.SafetyError:
-        _check("tdv hard size cap refuses", True)
+    # Venue caps ship DISABLED (TopStep parity): a full 5-contract order — the
+    # user's real TopStep sizing — passes the Tradovate guard (RiskGuard still
+    # applies at the engine level, exactly as on TopStep).
+    _check("tdv venue caps ship disabled (TopStep parity)",
+           tdv_safety.MAX_POSITION_SIZE is None and tdv_safety.MAX_DAILY_LOSS is None)
+    full = cl.place_order(account_id=7001, contract_id=con.id,
+                          order_type=OrderType.MARKET, side=OrderSide.BUY, size=5)
+    _check("tdv 5-contract order passes (same as TopStep)", full.success)
 
     # order failure mapping
     class _RestFail(_Rest):
@@ -1003,6 +1003,17 @@ def run_selftest() -> int:
                         "tradeDate": {"year": 2026, "month": 7, "day": 16}})
     _check("tdv kill: realizedPnL field preferred", len(kills2) == 1, f"got {kills2}")
 
+    # default construction (shipped MAX_DAILY_LOSS=None) -> watcher disabled,
+    # even on a huge drawdown event (TopStep-parity guards only)
+    kills3 = []
+    cache3 = UserSyncCache(on_kill=kills3.append)
+    cache3.apply_props("cashBalance", "Updated",
+                       {"id": 83, "accountId": 7001, "amount": 51000.0,
+                        "realizedPnL": -99999.0,
+                        "tradeDate": {"year": 2026, "month": 7, "day": 16}})
+    _check("tdv kill: disabled by default (parity — no venue loss cap)",
+           kills3 == [], f"got {kills3}")
+
     # QuoteCache: trade price, bid/offer mid fallback, merge, staleness
     qclock = [1000.0]
     qc = QuoteCache(clock=lambda: qclock[0], stale_after=10.0)
@@ -1027,19 +1038,9 @@ def run_selftest() -> int:
            type(eng_px.client).__name__ == "ProjectXClient",
            f"got {type(eng_px.client).__name__}")
 
-    # 13g) safety guards end-to-end on the client (kill switch + projected cap)
-    _check("tdv safety constants are hard-coded sane values",
-           tdv_safety.MAX_POSITION_SIZE == 2 and tdv_safety.MAX_DAILY_LOSS == 500.0)
-
-    # projected |netPos| + size may not exceed MAX_POSITION_SIZE: the scripted
-    # book already holds net -1, so a 2-lot (1+2=3 > 2) must be refused while a
-    # 1-lot passes (the earlier flatten order proved 1-lot passes).
-    try:
-        cl.place_order(account_id=7001, contract_id=con.id,
-                       order_type=OrderType.MARKET, side=OrderSide.BUY, size=2)
-        _check("tdv projected-position cap refuses", False, "no exception")
-    except tdv_safety.SafetyError as exc:
-        _check("tdv projected-position cap refuses", "Projected" in str(exc))
+    # 13g) kill-switch machinery on the client (inert by default — the daily-loss
+    # watcher is disabled while MAX_DAILY_LOSS is None — but _trip_kill must
+    # still work when deliberately re-enabled for live).
 
     # kill switch: tripping it blocks new orders and sweeps the book
     n_before = len(rest.calls)
@@ -1116,6 +1117,14 @@ def run_selftest() -> int:
     _check("tdv E2E: short fill cancels the long entry",
            long_oid in ft.cancelled and short_oid not in ft.cancelled,
            f"cancelled={ft.cancelled}")
+
+    # full-size parity: the user's real 4-contract straddle places unchanged
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade", contracts=4)
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    _check("tdv E2E: 4-contract legs place (TopStep-parity sizing)",
+           len(ft.placed) == 2 and all(o["orderQty"] == 4 for o in ft.placed),
+           f"got {[o.get('orderQty') for o in ft.placed]}")
 
     # emergency stop: cancel sweep + flatten via opposing market on signed netPos
     eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")

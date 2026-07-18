@@ -1,27 +1,35 @@
-"""Hard-coded live-trading safeguards for the Tradovate backend.
+"""Live-trading environment gate + optional venue caps for the Tradovate backend.
 
 These are SOURCE-LEVEL constants on purpose — not Settings fields, not
-UI-editable. Flipping to live trading requires editing this file and re-running
-the selftest, so it can never happen by accident, by mis-click, or by a bad
-settings file. They sit BELOW the user-facing guards (Settings.dry_run,
-Settings.max_contracts, RiskGuard) as defense in depth.
+UI-editable — so flipping them requires editing this file and re-running the
+selftest; it can never happen by mis-click or a bad settings file.
 
-Also configure Tradovate's own account-level risk settings as the
-platform-side backstop — these client-side guards stop the bot, not the venue.
+Guard parity (user directive 2026-07-18): the Tradovate path runs under the
+SAME guard set as the TopStep path — ``Settings.max_contracts``, RiskGuard's
+``max_trades_per_day``, and ``dry_run``. The venue-specific caps below ship
+DISABLED (= None) so the exact TopStep-sim strategy (4–5 contracts, ~$600
+stop) executes unchanged on Tradovate demo. Tradovate's own account-level
+risk settings are the platform-side backstop.
+
+Before enabling LIVE_TRADING, deliberately decide whether to re-enable the
+caps (set integers/floats instead of None) — on a personal account there is
+no prop-firm daily-loss net above you.
 """
 from __future__ import annotations
+
+from typing import Optional
 
 # Must be flipped to True IN SOURCE before the live endpoint can even be
 # constructed. Demo (demo.tradovateapi.com) never needs it.
 LIVE_TRADING: bool = False
 
-# Hard ceiling on any single order size AND on the projected absolute net
-# position. Independent of (and lower than) Settings.max_contracts.
-MAX_POSITION_SIZE: int = 2
+# Optional hard ceiling on any single order size. None = disabled (parity with
+# TopStep: the engine-level max_contracts/RiskGuard still applies).
+MAX_POSITION_SIZE: Optional[int] = None
 
-# Realized daily loss (USD) that trips the kill switch: block new orders,
-# cancel working orders, liquidate. Resets only on restart + a new day.
-MAX_DAILY_LOSS: float = 500.0
+# Optional realized-daily-loss (USD) kill switch: block new orders, cancel
+# working orders, liquidate; resets only on restart + a new day. None = disabled.
+MAX_DAILY_LOSS: Optional[float] = None
 
 
 class SafetyError(RuntimeError):

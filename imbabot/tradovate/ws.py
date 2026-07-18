@@ -104,14 +104,16 @@ class UserSyncCache:
     }
 
     def __init__(self, *, on_kill: Optional[Callable[[str], None]] = None,
-                 max_daily_loss: Optional[float] = None) -> None:
+                 max_daily_loss: Optional[float] = safety.MAX_DAILY_LOSS) -> None:
+        # max_daily_loss=None (the shipped safety.py default) disables the
+        # daily-loss kill switch entirely — TopStep-parity guards only. Tests
+        # pass an explicit value to exercise the machinery.
         self._lock = threading.Lock()
         self._store: Dict[str, Dict[int, Dict[str, Any]]] = {
             "order": {}, "orderVersion": {}, "position": {}, "cashBalance": {},
         }
         self._on_kill = on_kill
-        self._max_daily_loss = (safety.MAX_DAILY_LOSS if max_daily_loss is None
-                                else max_daily_loss)
+        self._max_daily_loss = max_daily_loss
         self._day_baseline: Dict[str, float] = {}
         self._killed = False
 
@@ -177,7 +179,7 @@ class UserSyncCache:
         Prefers the venue's own realizedPnL field; falls back to the delta of
         ``amount`` against the first balance seen for that trade date.
         """
-        if self._killed or self._on_kill is None:
+        if self._killed or self._on_kill is None or self._max_daily_loss is None:
             return
         day = json.dumps(cb.get("tradeDate"), sort_keys=True, default=str)
         loss: Optional[float] = None

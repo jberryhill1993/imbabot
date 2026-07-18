@@ -166,23 +166,23 @@ class TradovateClient:
         return info
 
     def _guard_order(self, account_id: int, size: int) -> None:
-        """Gate #3: hard per-order + projected-position ceiling, kill switch."""
+        """Kill-switch check + OPTIONAL venue size cap.
+
+        With safety.MAX_POSITION_SIZE = None (the shipped default), sizing is
+        governed by the same guards as the TopStep path: Settings.max_contracts
+        via RiskGuard at the engine level. The cap here is a deliberate opt-in
+        for live (see safety.py). NOTE: the cap is per-ORDER only — a projected-
+        position check was removed because it cannot tell risk-reducing orders
+        (flatten) from risk-adding ones and would refuse a full-size flatten.
+        """
         if self._kill_reason:
             raise safety.SafetyError(
                 f"Kill switch is tripped ({self._kill_reason}) — order refused.")
-        if size > safety.MAX_POSITION_SIZE:
+        cap = safety.MAX_POSITION_SIZE
+        if cap is not None and size > cap:
             raise safety.SafetyError(
                 f"Order size {size} exceeds the hard Tradovate cap "
-                f"MAX_POSITION_SIZE={safety.MAX_POSITION_SIZE} (safety.py).")
-        try:
-            net = sum(abs(int(p.get("netPos") or 0))
-                      for p in self.search_open_positions(account_id))
-        except Exception:
-            net = 0
-        if net + size > safety.MAX_POSITION_SIZE:
-            raise safety.SafetyError(
-                f"Projected position {net}+{size} exceeds MAX_POSITION_SIZE="
-                f"{safety.MAX_POSITION_SIZE} (safety.py).")
+                f"MAX_POSITION_SIZE={cap} (safety.py).")
 
     # --------------------------------------------------------------- auth
     def authenticate(self, username: str, api_key: str) -> str:
@@ -223,12 +223,13 @@ class TradovateClient:
             self._connect_sockets()
         # Gate #2 banner: unambiguous statement of which venue is armed.
         dry = getattr(self._settings, "dry_run", True)
+        cap = safety.MAX_POSITION_SIZE
+        loss = safety.MAX_DAILY_LOSS
         self._log(
             f"TRADOVATE CONNECTED — env={self._env.upper()} "
             f"endpoint={self._base_url().split('//')[1].split('/')[0]} "
             f"LIVE_TRADING={safety.LIVE_TRADING} dry_run={dry} "
-            f"max_pos={safety.MAX_POSITION_SIZE} "
-            f"max_daily_loss=${safety.MAX_DAILY_LOSS:.0f}",
+            f"venue_caps={'off (TopStep-parity guards)' if cap is None and loss is None else f'max_pos={cap} max_daily_loss=${loss}'}",
             "warning" if self._env == "live" else "info",
         )
         return token

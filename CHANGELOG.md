@@ -24,11 +24,15 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
     fresh-token authorize → `user/syncrequest` resync → quote re-subscribe;
     order/position caches feed the unchanged 0.5s OCO poll (REST fallback if
     the socket is unhealthy).
-  - `safety.py` — **hard-coded** gates: `LIVE_TRADING=False` (live endpoint
-    un-constructable until edited in source), `MAX_POSITION_SIZE=2` (per-order
-    + projected net), `MAX_DAILY_LOSS=$500` kill switch (cancel-all +
-    liquidate + block until restart/new day). Startup banner states
-    env/endpoint/account/gates on every connect.
+  - `safety.py` — **hard-coded** environment gate: `LIVE_TRADING=False` (live
+    endpoint un-constructable until edited in source). **Guard parity with
+    TopStep** (user directive 2026-07-18): the optional venue caps
+    (`MAX_POSITION_SIZE`, `MAX_DAILY_LOSS` kill switch) ship **disabled**
+    (None) so the identical 4–5 contract strategy runs on demo under the same
+    guards as TopStep (max_contracts + RiskGuard + dry_run); set values in
+    safety.py to re-enable (revisit at the live flip). The kill-switch
+    machinery remains built and selftested. Startup banner states
+    env/endpoint/gates on every connect.
 - **`imbabot/broker.py`** — BrokerAdapter Protocol codifying the duck-typed
   engine⇄client contract; selftest pins ProjectX/Tradovate/fakes conformance.
 - **Both UIs**: Tradovate backend selector, credential form (username/password/

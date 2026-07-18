@@ -243,10 +243,13 @@ backend selector.
 **Endpoints & safety.** DEMO (`demo.tradovateapi.com`) is the default and the
 only endpoint this build will connect to: the LIVE endpoint is hard-gated by
 `imbabot/tradovate/safety.py` (`LIVE_TRADING = False`, a source-level constant —
-not a setting). Also compiled in: `MAX_POSITION_SIZE = 2` (per-order AND
-projected net position, beneath the usual `max_contracts` guard) and
-`MAX_DAILY_LOSS = $500` — a breach cancels all working orders, liquidates, and
-blocks new orders until restart + a new day. `dry_run` starts ON as always.
+not a setting). **Guard parity with TopStep:** the Tradovate path runs under the
+exact same guards as the TopStep path — the `max_contracts` setting, RiskGuard's
+trades-per-day limit, and `dry_run` (ON by default) — so the same 4–5 contract
+strategy executes unchanged on demo. Optional venue caps (`MAX_POSITION_SIZE`,
+`MAX_DAILY_LOSS` kill switch) exist in `safety.py` but ship **disabled** (None);
+set values there to re-enable them. Configure Tradovate's own account-level risk
+settings as the platform-side backstop.
 
 **Brackets are native.** On Tradovate the bot places entry stops as server-side
 OSO orders (bracket SL/TP live at the venue and survive a crash or disconnect).
@@ -286,11 +289,13 @@ auto-fire at a quiet time, 1 contract, dry-run first, then a real demo fire.
 
 ### Going live on Tradovate (deliberate, later)
 Only after the demo check and an engine rehearsal pass: edit
-`imbabot/tradovate/safety.py` → `LIVE_TRADING = True`, re-run
-`python -m imbabot.cli selftest`, switch Environment to **live** in the
-Connect tab, and confirm the red **TDV LIVE** badge + startup banner. The
-account roles are: **TopStep PRAC = testing**, **Tradovate = live capital** —
-never flip live on a whim; the gate is in source on purpose.
+`imbabot/tradovate/safety.py` → `LIVE_TRADING = True`, **decide the venue caps**
+(`MAX_POSITION_SIZE` / `MAX_DAILY_LOSS` are None for demo parity — on a personal
+account there is no prop-firm daily-loss net above you, so consider setting
+real values), re-run `python -m imbabot.cli selftest`, switch Environment to
+**live** in the Connect tab, and confirm the red **TDV LIVE** badge + startup
+banner. The account roles are: **TopStep PRAC = testing**, **Tradovate = live
+capital** — never flip live on a whim; the gate is in source on purpose.
 
 ## Browser backend (fallback)
 
