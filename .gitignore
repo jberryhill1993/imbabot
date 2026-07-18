@@ -21,3 +21,7 @@ assets/icon_preview.png
 # OS
 .DS_Store
 release/
+
+# Never commit credential notes
+TRADOVATE API.txt
+*api*key*.txt

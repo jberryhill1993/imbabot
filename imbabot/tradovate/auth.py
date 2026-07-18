@@ -180,9 +180,15 @@ class TokenManager:
                                       {"Content-Type": "application/json"}, self._timeout)
             if "p-ticket" in data:
                 if data.get("p-captcha"):
+                    server_msg = data.get("p-message") or ""
+                    hint = (" NOTE: Tradovate allows ~5 API login attempts per hour — "
+                            "wait an hour before retrying." if "rate limit" in
+                            server_msg.lower() else "")
                     raise TradovateAuthError(
-                        "Tradovate requires a captcha for this login. Log in once at "
-                        "trader.tradovate.com from this computer, then try again.")
+                        f"Tradovate blocked this login with a captcha"
+                        f"{' (' + server_msg + ')' if server_msg else ''}. "
+                        f"Log in once at trader.tradovate.com from this computer, "
+                        f"then try again.{hint}")
                 p_time = float(data.get("p-time") or 5)
                 if attempt >= _PENALTY_MAX_RETRIES or waited + p_time > _PENALTY_MAX_TOTAL_WAIT:
                     raise TradovateAuthError(
