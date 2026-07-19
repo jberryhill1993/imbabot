@@ -68,6 +68,13 @@ class Settings:
     entry_points: float = 12.0
     stop_loss_points: float = 12.0
     take_profit_points: float = 12.0
+    # $-entry mode (TopStep Position-Brackets UX): the user types dollars per
+    # POSITION; the UI converts to tick-floored points at save time. The
+    # *_points fields above remain the single source of truth the engine reads;
+    # the dollar values are kept only to restore the form.
+    sl_tp_entry_mode: str = "points"   # "points" | "dollars"
+    stop_loss_dollars: float = 0.0
+    take_profit_dollars: float = 0.0
     contracts: int = 2
     trade_mode: str = "semi_auto"    # "semi_auto" | "one_trade"
     # SL/TP are handled by TopStep Position Brackets by default (naked entries).

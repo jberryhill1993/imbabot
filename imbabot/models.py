@@ -6,7 +6,7 @@ installing requests/keyring or touching the network.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from enum import Enum, IntEnum
 from typing import List, Optional
 
@@ -169,3 +169,39 @@ def points_to_ticks(points: float, tick_size: float) -> int:
     if tick_size <= 0:
         return max(1, int(round(points)))
     return max(1, int(round(points / tick_size)))
+
+
+# Fallback $-per-point per contract by symbol root, for converting $ SL/TP
+# before a broker connection has resolved the real contract tick math.
+_DOLLARS_PER_POINT = {"NQ": 20.0, "MNQ": 2.0, "ES": 50.0, "MES": 5.0}
+
+
+def dollars_per_point_for(symbol: str) -> Optional[float]:
+    """$ per point per contract for a symbol/contract name, or None if unknown.
+
+    Accepts roots (NQ/MNQ) and full contract names in Tradovate (NQU6) or
+    TopStep (NQU26) style.
+    """
+    from .tradovate.client import split_symbol  # local: avoid a module cycle
+
+    root, _month, _year = split_symbol((symbol or "").upper().strip())
+    return _DOLLARS_PER_POINT.get(root)
+
+
+def dollars_to_points(dollars: float, contracts: int, dollars_per_point: float,
+                      tick_size: float) -> float:
+    """Convert a per-POSITION dollar amount into a per-contract point distance,
+    FLOORED to the tick grid — conservative on purpose: a $-entered stop never
+    risks more than typed, a $-entered target never demands more than typed.
+
+    E.g. $600 at 4ct NQ ($20/pt): 600/(4*20) = 7.5 pts; $550 -> 6.875 -> 6.75.
+    """
+    if dollars <= 0 or contracts <= 0 or dollars_per_point <= 0:
+        raise ValueError("dollars, contracts and dollars_per_point must be positive")
+    raw = dollars / (contracts * dollars_per_point)
+    if tick_size <= 0:
+        return raw
+    tick = Decimal(str(tick_size))
+    steps = (Decimal(str(raw)) / tick).quantize(Decimal("1"), rounding=ROUND_FLOOR)
+    pts = float(steps * tick)
+    return pts if pts > 0 else float(tick)   # never floor to zero distance

@@ -253,10 +253,18 @@ settings as the platform-side backstop.
 
 **Brackets are native.** On Tradovate the bot places entry stops as server-side
 OSO orders (bracket SL/TP live at the venue and survive a crash or disconnect).
-There is no TopStep-style "Position Brackets" backstop, so keep the bot
-SL/TP toggles ON for Tradovate — a naked entry there is truly naked (the bot
-warns loudly). Also set Tradovate's own account risk settings as the
-platform-side backstop.
+There is no TopStep-style "Position Brackets" backstop — Tradovate's own UI
+bracket presets apply only to orders placed through their screen, NOT to API
+orders — so keep the bot SL/TP toggles ON for Tradovate; a naked entry there is
+truly naked (the bot warns loudly). Also set Tradovate's own account risk
+settings as the platform-side backstop.
+
+**Entering SL/TP in dollars.** To mirror the TopStep Position-Brackets workflow,
+switch "SL/TP entered as" to **$ per position** and type dollar amounts (e.g.
+SL $600 / TP $550): the bot converts to per-contract points using your contract
+count and the symbol's $/point (NQ $20, MNQ $2), FLOORED to the tick grid so a
+$-entered stop never risks more than typed. Example: $600 at 4ct NQ = 7.5 pts;
+$550 = 6.75 pts ($540 — $550 doesn't land on a tick).
 
 **Data — read this before buying anything.** Two very different CME items exist:
 the retail CME Bundle (~$39/mo) licenses quotes **inside the Tradovate app

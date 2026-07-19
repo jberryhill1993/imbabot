@@ -59,6 +59,15 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
   only opens for "tradovate"; the user-sync socket always runs. Both UIs gain
   a Price source selector; demo check is source-aware.
 
+### Added — $-based SL/TP entry (TopStep Position-Brackets UX)
+- New "SL/TP entered as: points | $ per position" mode in both UIs. Dollar
+  amounts convert to per-contract points via contracts × $/point (resolved
+  contract math when connected; NQ/MNQ/ES/MES fallback table), FLOORED to the
+  tick grid (a $-entered stop never risks more than typed). Points remain the
+  single engine source of truth; typed dollars persist for the form.
+  Needed because Tradovate UI bracket presets do not apply to API orders —
+  the bot's OSO brackets are the only brackets there.
+
 ### Notes
 - `session_range`/`retrieve_bars` are not yet supported on the Tradovate
   backend (dashboard shows “—”; the Morning Plan is Databento-backed and

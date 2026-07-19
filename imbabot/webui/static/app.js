@@ -9,6 +9,8 @@ let API = null;          // window.pywebview.api once ready
 let logCursor = 0;
 let backend = "api";     // segmented control state
 let tdvEnv = "demo";     // Tradovate environment segment state
+let sltpMode = "points"; // SL/TP entry mode: "points" | "dollars" (per position)
+let dollarsPerPoint = null;  // $/pt per contract, from the bridge (contract-aware)
 
 /* ---------------------------------------------------------------- helpers */
 function setChg(prefix, chg, pct, invert = false) {
@@ -45,8 +47,13 @@ function collectSettings() {
     username: $("f-user").value.trim(),
     contract_symbol: $("f-symbol").value.trim().toUpperCase(),
     entry_points: parseFloat($("f-entry").value),
-    stop_loss_points: parseFloat($("f-sl").value),
-    take_profit_points: parseFloat($("f-tp").value),
+    // In $ mode the two inputs hold dollars-per-position; the BRIDGE converts
+    // to tick-floored points (single conversion implementation, in Python).
+    sl_tp_entry_mode: sltpMode,
+    stop_loss_points: sltpMode === "points" ? parseFloat($("f-sl").value) : undefined,
+    take_profit_points: sltpMode === "points" ? parseFloat($("f-tp").value) : undefined,
+    stop_loss_dollars: sltpMode === "dollars" ? parseFloat($("f-sl").value) : 0,
+    take_profit_dollars: sltpMode === "dollars" ? parseFloat($("f-tp").value) : 0,
     contracts: parseInt($("f-contracts").value, 10),
     bot_stop_loss: $("f-botsl").checked,
     bot_take_profit: $("f-bottp").checked,
@@ -105,6 +112,50 @@ document.querySelectorAll("#seg-tdvenv button").forEach((b) => {
     tdvEnv = b.dataset.val;
   });
 });
+
+/* SL/TP entry mode: points vs $ per position (TopStep Position-Brackets UX).
+   The bridge does the authoritative $->points conversion; hints here preview it. */
+function sltpHint(el, hintEl) {
+  if (sltpMode !== "dollars") { hintEl.textContent = ""; return; }
+  const usd = parseFloat(el.value);
+  const ct = parseInt($("f-contracts").value, 10);
+  if (!usd || !ct || !dollarsPerPoint) { hintEl.textContent = ""; return; }
+  const raw = usd / (ct * dollarsPerPoint);
+  const pts = Math.max(0.25, Math.floor(raw / 0.25) * 0.25);  // floor to tick
+  hintEl.textContent = `$${usd} at ${ct}ct ≈ ${pts} pts (${dollarsPerPoint}$/pt)`;
+}
+function refreshSltpUI() {
+  const dollars = sltpMode === "dollars";
+  $("lbl-sl").innerHTML = dollars ? 'Stop-loss $ <span class="hint">(per position)</span>'
+                                  : 'Stop-loss points <span class="hint">(bot-managed)</span>';
+  $("lbl-tp").innerHTML = dollars ? 'Take-profit $ <span class="hint">(per position)</span>'
+                                  : 'Take-profit points <span class="hint">(bot-managed)</span>';
+  $("f-sl").step = dollars ? "10" : "0.25";
+  $("f-tp").step = dollars ? "10" : "0.25";
+  sltpHint($("f-sl"), $("hint-sl"));
+  sltpHint($("f-tp"), $("hint-tp"));
+}
+document.querySelectorAll("#seg-sltp button").forEach((b) => {
+  b.addEventListener("click", () => {
+    if (b.dataset.val === sltpMode) return;
+    document.querySelectorAll("#seg-sltp button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    const ct = parseInt($("f-contracts").value, 10) || 1;
+    // convert the displayed values so the switch never silently changes risk
+    const sl = parseFloat($("f-sl").value), tp = parseFloat($("f-tp").value);
+    if (dollarsPerPoint && b.dataset.val === "dollars") {
+      if (sl) $("f-sl").value = Math.round(sl * ct * dollarsPerPoint);
+      if (tp) $("f-tp").value = Math.round(tp * ct * dollarsPerPoint);
+    } else if (dollarsPerPoint && b.dataset.val === "points") {
+      if (sl) $("f-sl").value = Math.max(0.25, Math.floor(sl / (ct * dollarsPerPoint) / 0.25) * 0.25);
+      if (tp) $("f-tp").value = Math.max(0.25, Math.floor(tp / (ct * dollarsPerPoint) / 0.25) * 0.25);
+    }
+    sltpMode = b.dataset.val;
+    refreshSltpUI();
+  });
+});
+["f-sl", "f-tp", "f-contracts"].forEach((id) =>
+  $(id).addEventListener("input", refreshSltpUI));
 
 /* collapsible log */
 $("log-head").addEventListener("click", (e) => {
@@ -370,8 +421,17 @@ async function init() {
   $("f-key").placeholder = s.has_key ? "stored on this device" : "enter your API key";
   $("f-symbol").value = s.contract_symbol;
   $("f-entry").value = s.entry_points;
-  $("f-sl").value = s.stop_loss_points;
-  $("f-tp").value = s.take_profit_points;
+  dollarsPerPoint = s.dollars_per_point || null;
+  sltpMode = s.sl_tp_entry_mode || "points";
+  document.querySelectorAll("#seg-sltp button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.val === sltpMode));
+  if (sltpMode === "dollars" && s.stop_loss_dollars > 0) {
+    $("f-sl").value = s.stop_loss_dollars;
+    $("f-tp").value = s.take_profit_dollars || "";
+  } else {
+    $("f-sl").value = s.stop_loss_points;
+    $("f-tp").value = s.take_profit_points;
+  }
   $("f-contracts").value = s.contracts;
   $("f-daily-time").value = s.strategy_fire_time;
   $("f-botsl").checked = s.bot_stop_loss;
@@ -396,6 +456,7 @@ async function init() {
   document.querySelectorAll("#seg-backend button").forEach((b) =>
     b.classList.toggle("active", b.dataset.val === backend));
   refreshBackendUI();
+  refreshSltpUI();
   poll();
 }
 

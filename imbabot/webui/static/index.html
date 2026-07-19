@@ -154,17 +154,25 @@
       <div class="grid2">
         <div>
           <div class="field"><label>Entry points (±)</label><input type="number" class="short" id="f-entry" step="0.25"></div>
-          <div class="field"><label>Stop-loss points <span class="hint">(bot-managed)</span></label>
+          <div class="field"><label>SL/TP entered as</label>
+            <div class="segment" id="seg-sltp">
+              <button data-val="points" class="active">Points</button>
+              <button data-val="dollars">$ per position</button>
+            </div>
+          </div>
+          <div class="field"><label id="lbl-sl">Stop-loss points <span class="hint">(bot-managed)</span></label>
             <span style="display:flex;align-items:center;gap:10px">
               <label class="switch"><input type="checkbox" id="f-botsl"><span class="slider"></span></label>
               <input type="number" class="short" id="f-sl" step="0.25">
             </span>
+            <div class="hint" id="hint-sl"></div>
           </div>
-          <div class="field"><label>Take-profit points <span class="hint">(bot-managed)</span></label>
+          <div class="field"><label id="lbl-tp">Take-profit points <span class="hint">(bot-managed)</span></label>
             <span style="display:flex;align-items:center;gap:10px">
               <label class="switch"><input type="checkbox" id="f-bottp"><span class="slider"></span></label>
               <input type="number" class="short" id="f-tp" step="0.25">
             </span>
+            <div class="hint" id="hint-tp"></div>
           </div>
           <div class="field"><label>Contracts</label><input type="number" class="short" id="f-contracts" step="1"></div>
           <div class="field"><label>Fire daily at (HH:MM:SS)</label><input type="text" class="short" id="f-daily-time"></div>

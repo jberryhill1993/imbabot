@@ -706,17 +706,33 @@ class ImbabotGUI:
         # bracket instead of TopStep.
         self.var_bot_sl = tk.BooleanVar(value=self.settings.bot_stop_loss)
         self.var_bot_tp = tk.BooleanVar(value=self.settings.bot_take_profit)
-        ttk.Checkbutton(tab, text="Stop-loss points (bot-managed)", variable=self.var_bot_sl,
-                        command=self._on_bracket_toggle, style="S.TCheckbutton").grid(
-                        row=4, column=0, sticky="w", padx=(0, 8), pady=5)
+        self.chk_bot_sl = ttk.Checkbutton(tab, text="Stop-loss points (bot-managed)",
+                                          variable=self.var_bot_sl,
+                                          command=self._on_bracket_toggle, style="S.TCheckbutton")
+        self.chk_bot_sl.grid(row=4, column=0, sticky="w", padx=(0, 8), pady=5)
         self.ent_sl = ttk.Entry(tab, textvariable=self.var_sl, width=8, font=(FONT, 11))
         self.ent_sl.grid(row=4, column=1, sticky="w", pady=5)
-        ttk.Checkbutton(tab, text="Take-profit points (bot-managed)", variable=self.var_bot_tp,
-                        command=self._on_bracket_toggle, style="S.TCheckbutton").grid(
-                        row=5, column=0, sticky="w", padx=(0, 8), pady=5)
+        self.chk_bot_tp = ttk.Checkbutton(tab, text="Take-profit points (bot-managed)",
+                                          variable=self.var_bot_tp,
+                                          command=self._on_bracket_toggle, style="S.TCheckbutton")
+        self.chk_bot_tp.grid(row=5, column=0, sticky="w", padx=(0, 8), pady=5)
         self.ent_tp = ttk.Entry(tab, textvariable=self.var_tp, width=8, font=(FONT, 11))
         self.ent_tp.grid(row=5, column=1, sticky="w", pady=5)
         self._on_bracket_toggle()    # set initial grayed/enabled state from settings
+        # $-entry mode: type SL/TP as dollars per POSITION (TopStep Position-
+        # Brackets UX); converted to tick-floored points at collect time.
+        self.var_sltp_dollars = tk.BooleanVar(
+            value=self.settings.sl_tp_entry_mode == "dollars")
+        ttk.Checkbutton(tab, text="Enter SL/TP in $ (per position)",
+                        variable=self.var_sltp_dollars, command=self._on_sltp_mode,
+                        style="S.TCheckbutton").grid(row=6, column=2, columnspan=2,
+                                                     sticky="w", padx=(28, 0))
+        if self.var_sltp_dollars.get():
+            if self.settings.stop_loss_dollars > 0:
+                self.var_sl.set(str(self.settings.stop_loss_dollars))
+            if self.settings.take_profit_dollars > 0:
+                self.var_tp.set(str(self.settings.take_profit_dollars))
+            self._on_sltp_mode()
 
         # Only One-Trade is exposed. Semi-Auto / Two-Trade remain in the engine
         # (TradeMode values) but are no longer offered in the UI.
@@ -844,6 +860,14 @@ class ImbabotGUI:
         self.ent_sl.configure(state="normal" if self.var_bot_sl.get() else "disabled")
         self.ent_tp.configure(state="normal" if self.var_bot_tp.get() else "disabled")
 
+    def _on_sltp_mode(self) -> None:
+        """Relabel the SL/TP checkboxes for $-per-position vs points entry."""
+        dollars = self.var_sltp_dollars.get()
+        self.chk_bot_sl.configure(text="Stop-loss $ (bot-managed)" if dollars
+                                  else "Stop-loss points (bot-managed)")
+        self.chk_bot_tp.configure(text="Take-profit $ (bot-managed)" if dollars
+                                  else "Take-profit points (bot-managed)")
+
     def _surface(self, tab):
         """Register surface-bg variants of styles used inside notebook tabs (once)."""
         st = self.st
@@ -891,6 +915,28 @@ class ImbabotGUI:
             s.stop_loss_points = float(self.var_sl.get())
             s.take_profit_points = float(self.var_tp.get())
             s.contracts = int(self.var_contracts.get())
+            s.sl_tp_entry_mode = "dollars" if self.var_sltp_dollars.get() else "points"
+            if s.sl_tp_entry_mode == "dollars":
+                # var_sl/var_tp hold dollars per position; convert to points.
+                from .models import dollars_per_point_for, dollars_to_points
+                dpp = None
+                c = getattr(self.engine, "contract", None) if self.engine else None
+                if c is not None and c.tick_size:
+                    dpp = c.tick_value / c.tick_size
+                dpp = dpp or dollars_per_point_for(s.contract_symbol)
+                if not dpp:
+                    messagebox.showerror(
+                        "Unknown $/point",
+                        f"Don't know the $/point for {s.contract_symbol!r} — connect "
+                        "first or untick 'Enter SL/TP in $'.")
+                    return None
+                tick = c.tick_size if (c is not None and c.tick_size) else 0.25
+                s.stop_loss_dollars = float(self.var_sl.get())
+                s.take_profit_dollars = float(self.var_tp.get())
+                s.stop_loss_points = dollars_to_points(
+                    s.stop_loss_dollars, s.contracts, dpp, tick)
+                s.take_profit_points = dollars_to_points(
+                    s.take_profit_dollars, s.contracts, dpp, tick)
             s.bot_stop_loss = bool(self.var_bot_sl.get())
             s.bot_take_profit = bool(self.var_bot_tp.get())
             s.trade_mode = self.var_mode.get()

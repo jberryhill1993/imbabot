@@ -33,6 +33,7 @@ _SETTINGS_FIELDS = [
     ("test_fire_time", str), ("strategy_fire_time", str), ("base_url", str),
     ("username", str), ("contract_symbol", lambda v: str(v).strip().upper()),
     ("entry_points", float), ("stop_loss_points", float), ("take_profit_points", float),
+    ("sl_tp_entry_mode", str), ("stop_loss_dollars", float), ("take_profit_dollars", float),
     ("contracts", int), ("bot_stop_loss", bool), ("bot_take_profit", bool),
     ("trade_mode", str), ("entry_order_type", str), ("entry_limit_offset_ticks", int),
     ("use_live_data", bool), ("dry_run", bool),
@@ -98,9 +99,20 @@ class Api:
             self._poll_stop.wait(5.0)
 
     # --------------------------------------------------------- settings I/O
+    def _dollars_per_point(self) -> Optional[float]:
+        """$/pt per contract: resolved contract math when connected, else the
+        symbol-root fallback table (None for unknown roots)."""
+        if self.engine is not None:
+            c = getattr(self.engine, "contract", None)
+            if c is not None and c.tick_size:
+                return c.tick_value / c.tick_size
+        from ..models import dollars_per_point_for
+        return dollars_per_point_for(self.settings.contract_symbol)
+
     def get_settings(self) -> dict:
         s = self.settings
         out = {k: getattr(s, k) for k, _ in _SETTINGS_FIELDS}
+        out["dollars_per_point"] = self._dollars_per_point()
         out["has_key"] = bool(s.username and load_api_key(s.username))
         out["has_tdv_credentials"] = bool(
             s.tdv_username and load_tradovate_credentials(s.tdv_username))
@@ -116,6 +128,26 @@ class Api:
                     setattr(self.settings, key, coerce(payload[key]))
         except (ValueError, TypeError) as exc:
             return f"Check the strategy numbers: {exc}"
+        # $-entry mode: dollars (per position) -> tick-floored points. Points
+        # stay the single source of truth the engine reads.
+        s = self.settings
+        if s.sl_tp_entry_mode == "dollars":
+            from ..models import dollars_to_points
+            dpp = self._dollars_per_point()
+            if not dpp:
+                return (f"Don't know the $/point for {s.contract_symbol!r} — "
+                        "connect first or switch SL/TP entry back to points.")
+            c = getattr(self.engine, "contract", None) if self.engine else None
+            tick = c.tick_size if (c is not None and c.tick_size) else 0.25
+            try:
+                if s.stop_loss_dollars > 0:
+                    s.stop_loss_points = dollars_to_points(
+                        s.stop_loss_dollars, s.contracts, dpp, tick)
+                if s.take_profit_dollars > 0:
+                    s.take_profit_points = dollars_to_points(
+                        s.take_profit_dollars, s.contracts, dpp, tick)
+            except ValueError as exc:
+                return f"Check the $ SL/TP values: {exc}"
         return None
 
     def save_settings(self, payload: dict) -> dict:

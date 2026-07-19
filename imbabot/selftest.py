@@ -1227,5 +1227,50 @@ def run_selftest() -> int:
            and flat[0]["size"] == 1
            and flat[0]["order_type"] == OrderType.MARKET, f"got {flat}")
 
+    # 14) $-based SL/TP entry (TopStep Position-Brackets UX in the bot)
+    from .models import dollars_per_point_for, dollars_to_points
+    _check("$->pts: SL $600 at 4ct NQ = 7.5", dollars_to_points(600, 4, 20.0, 0.25) == 7.5)
+    _check("$->pts: TP $550 floors to 6.75 (never demands more than typed)",
+           dollars_to_points(550, 4, 20.0, 0.25) == 6.75)
+    _check("$->pts: $480 = 6.0", dollars_to_points(480, 4, 20.0, 0.25) == 6.0)
+    _check("$->pts: MNQ $2/pt case ($96 at 4ct = 12.0)",
+           dollars_to_points(96, 4, 2.0, 0.25) == 12.0)
+    _check("$->pts: tiny $ never floors to zero distance",
+           dollars_to_points(1, 4, 20.0, 0.25) == 0.25)
+    try:
+        dollars_to_points(0, 4, 20.0, 0.25)
+        _check("$->pts: non-positive raises", False, "no exception")
+    except ValueError:
+        _check("$->pts: non-positive raises", True)
+    _check("$/pt lookup: NQ + full names + TopStep style",
+           dollars_per_point_for("NQ") == 20.0
+           and dollars_per_point_for("NQU6") == 20.0
+           and dollars_per_point_for("NQU26") == 20.0
+           and dollars_per_point_for("MNQ") == 2.0
+           and dollars_per_point_for("XYZQ99") is None)
+    s14 = Settings()
+    _check("$ entry defaults: points mode, no dollars",
+           s14.sl_tp_entry_mode == "points" and s14.stop_loss_dollars == 0.0)
+
+    # bridge conversion path (the single authoritative implementation)
+    from .webui.bridge import Api as _Api
+    api14 = _Api.__new__(_Api)               # no window/threads — just settings
+    api14.settings = Settings(contract_symbol="NQU26", contracts=4)
+    api14.engine = None
+    err = api14._apply_settings({"sl_tp_entry_mode": "dollars",
+                                 "stop_loss_dollars": 600, "take_profit_dollars": 550})
+    _check("bridge $ mode converts SL/TP to points",
+           err is None and api14.settings.stop_loss_points == 7.5
+           and api14.settings.take_profit_points == 6.75,
+           f"err={err} sl={api14.settings.stop_loss_points} tp={api14.settings.take_profit_points}")
+    _check("bridge $ mode preserves the typed dollars",
+           api14.settings.stop_loss_dollars == 600.0
+           and api14.settings.take_profit_dollars == 550.0)
+    api14.settings = Settings(contract_symbol="ZZZ", contracts=4)
+    err2 = api14._apply_settings({"sl_tp_entry_mode": "dollars",
+                                  "stop_loss_dollars": 600})
+    _check("bridge $ mode: unknown symbol root errors cleanly",
+           isinstance(err2, str) and "ZZZ" in err2, f"got {err2}")
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
