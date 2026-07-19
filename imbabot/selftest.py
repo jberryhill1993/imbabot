@@ -788,15 +788,18 @@ def run_selftest() -> int:
             if path == "account/list":
                 return 200, [{"id": 7001, "name": "DEMO7001", "active": True}]
             if path == "contract/suggest":
-                return 200, [{"id": 900, "name": "MNQZ5", "contractMaturityId": 1},
-                             {"id": 901, "name": "MNQU6", "contractMaturityId": 2},
-                             {"id": 902, "name": "MNQZ6", "contractMaturityId": 3}]
+                t = url.split("t=")[-1].split("&")[0]      # requested root
+                return 200, [{"id": 900, "name": f"{t}Z5", "contractMaturityId": 1},
+                             {"id": 901, "name": f"{t}U6", "contractMaturityId": 2},
+                             {"id": 902, "name": f"{t}Z6", "contractMaturityId": 3}]
             if path == "contractMaturity/item":
                 exp = {1: "2025-12-19", 2: "2026-09-18", 3: "2026-12-18"}
                 mid = int(url.split("id=")[-1])
                 return 200, {"id": mid, "expirationDate": f"{exp[mid]}T13:30:00Z"}
             if path == "product/find":
-                return 200, {"name": "MNQ", "tickSize": 0.25, "valuePerPoint": 2.0}
+                name = url.split("name=")[-1].split("&")[0]
+                vpp = 2.0 if name == "MNQ" else 20.0       # MNQ $0.50/tick, NQ $5
+                return 200, {"name": name, "tickSize": 0.25, "valuePerPoint": vpp}
             if path == "order/placeoso":
                 return 200, {"orderId": 111, "oso1Id": 112, "oso2Id": 113}
             if path == "order/placeorder":
@@ -837,6 +840,24 @@ def run_selftest() -> int:
     _check("tdv front month picked (nearest future expiry)",
            con.name == "MNQU6" and con.id == "901", f"got {con.name}/{con.id}")
     _check("tdv tick math from product", con.tick_size == 0.25 and con.tick_value == 0.5)
+
+    # symbol parsing: TopStep-style names must resolve (live-found bugs:
+    # 'NQU26' -> no contract; 'NQU6' -> root misread as 'NQU', tick lookup died)
+    from .tradovate.client import split_symbol
+    _check("tdv split_symbol: root only", split_symbol("MNQ") == ("MNQ", None, None))
+    _check("tdv split_symbol: NQU6", split_symbol("NQU6") == ("NQ", "U", "6"))
+    _check("tdv split_symbol: TopStep NQU26 -> NQ U 6",
+           split_symbol("NQU26") == ("NQ", "U", "6"))
+    _check("tdv split_symbol: MNQZ25", split_symbol("MNQZ25") == ("MNQ", "Z", "5"))
+    con_ts = cl.resolve_contract("NQU26")
+    _check("tdv TopStep-style symbol resolves to the Tradovate contract",
+           con_ts.name == "NQU6" and con_ts.tick_size == 0.25
+           and con_ts.tick_value == 5.0, f"got {con_ts.name}/{con_ts.tick_value}")
+    con_tv = cl.resolve_contract("NQU6")
+    _check("tdv explicit Tradovate name resolves", con_tv.name == "NQU6")
+    con_root = cl.resolve_contract("NQ")
+    _check("tdv bare NQ root resolves front month", con_root.name == "NQU6")
+    cl.resolve_contract("MNQ")   # restore the MNQ mapping (the fake reuses ids)
 
     # bracketed straddle leg -> native OSO with absolute prices
     from .models import StraddleLeg

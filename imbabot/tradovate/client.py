@@ -20,6 +20,7 @@ non-manual orders). Secrets are never logged.
 """
 from __future__ import annotations
 
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -79,6 +80,27 @@ def bracket_prices(side: OrderSide, entry_price: float, sl_ticks: int,
 def _exit_action(side: OrderSide) -> str:
     """Brackets close the position -> the opposite action of the entry."""
     return "Sell" if side == OrderSide.BUY else "Buy"
+
+
+_MONTH_CODES = "FGHJKMNQUVXZ"
+
+
+def split_symbol(symbol: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """Split a futures symbol into (root, month_code, year_digit).
+
+    'MNQ'/'NQ' -> root only. 'NQU6' AND the TopStep-style 'NQU26' both ->
+    ('NQ', 'U', '6') — Tradovate names use a SINGLE year digit. Roots can
+    themselves end in a month letter (NQ ends in Q), so the month code is only
+    split off when year digits are present.
+    """
+    symbol = (symbol or "").upper().strip()
+    m = re.fullmatch(r"([A-Z]+)(\d{1,2})", symbol)
+    if not m:
+        return symbol, None, None
+    stem, year = m.group(1), m.group(2)
+    if len(stem) >= 2 and stem[-1] in _MONTH_CODES:
+        return stem[:-1], stem[-1], year[-1]
+    return stem, None, None
 
 
 class TradovateClient:
@@ -323,22 +345,27 @@ class TradovateClient:
         return spec
 
     def resolve_contract(self, symbol: str, live: bool = False) -> Contract:
-        """Resolve a root symbol (MNQ) or explicit contract (MNQU6) to the
-        front-month Contract, with tick math from the product definition."""
+        """Resolve a root (MNQ/NQ) or explicit contract in Tradovate (NQU6) or
+        TopStep (NQU26) naming to the Contract, with product tick math."""
         symbol = (symbol or "").upper().strip()
-        root = "".join(ch for ch in symbol if ch.isalpha())
-        # Explicit contract name (root + month code + year digit)?
-        explicit = len(symbol) > len(root) and symbol[:len(root)] == root
+        root, month, year = split_symbol(symbol)
+        target = f"{root}{month}{year}" if month else None   # Tradovate name
 
         hits = self._request("GET", "/contract/suggest",
-                             params={"t": symbol if explicit else root, "l": 20}) or []
+                             params={"t": root, "l": 20}) or []
         candidates = [c for c in hits
                       if str(c.get("name", "")).upper().startswith(root)]
-        if explicit:
-            candidates = [c for c in candidates
-                          if str(c.get("name", "")).upper() == symbol] or candidates
+        if target:
+            exact = [c for c in candidates
+                     if str(c.get("name", "")).upper() == target]
+            if exact:
+                candidates = exact
+            elif candidates:
+                self._log(f"Tradovate: {target} not listed — falling back to "
+                          f"the {root} front month.", "warning")
         if not candidates:
-            raise TradovateError(f"No Tradovate contract found for {symbol!r}.")
+            raise TradovateError(
+                f"No Tradovate contract found for {symbol!r} (root {root!r}).")
 
         # Front month = the candidate with the nearest FUTURE maturity.
         def _maturity(c: dict) -> str:
