@@ -744,6 +744,15 @@ def run_selftest() -> int:
     except TradovateAuthError as exc:
         _check("tdv bad creds raise", "Incorrect" in str(exc))
 
+    # 13d2) transport must preserve list JSON — /account/list, /order/list and
+    # /position/list return ARRAYS; wrapping them broke the first live connect
+    # ("'str' object has no attribute 'get'"). Regression-pinned.
+    from .tradovate.auth import _coerce_json
+    _check("tdv http: list JSON preserved (live-connect regression)",
+           _coerce_json([{"id": 1}]) == [{"id": 1}]
+           and _coerce_json({"a": 1}) == {"a": 1}
+           and _coerce_json("Access denied") == {"_raw": "Access denied"})
+
     # 13e) TradovateClient REST + order mapping — scripted transport, no sockets.
     from .tradovate.client import (ACTION_MAP, ORDER_TYPE_MAP, TradovateClient,
                                    TradovateError, bracket_prices)

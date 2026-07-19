@@ -83,9 +83,17 @@ def _parse_expiration(raw: Any) -> Optional[float]:
         return None
 
 
+def _coerce_json(data: Any) -> Any:
+    """Keep dicts AND lists as-is (list endpoints like /account/list return
+    arrays); wrap scalars so callers can always treat errors uniformly."""
+    if isinstance(data, (dict, list)):
+        return data
+    return {"_raw": data}
+
+
 def _default_http(method: str, url: str, body: Optional[dict],
-                  headers: Dict[str, str], timeout: float) -> Tuple[int, dict]:
-    """Real transport (requests). Returns (status_code, parsed-json-or-{})."""
+                  headers: Dict[str, str], timeout: float) -> Tuple[int, Any]:
+    """Real transport (requests). Returns (status_code, parsed-json)."""
     import requests
 
     resp = requests.request(method, url, json=body, headers=headers, timeout=timeout)
@@ -93,9 +101,7 @@ def _default_http(method: str, url: str, body: Optional[dict],
         data = resp.json()
     except Exception:
         data = {}
-    if not isinstance(data, dict):
-        data = {"_raw": data}
-    return resp.status_code, data
+    return resp.status_code, _coerce_json(data)
 
 
 class TokenManager:
@@ -178,6 +184,8 @@ class TokenManager:
         for attempt in range(_PENALTY_MAX_RETRIES + 1):
             status, data = self._http("POST", url, body,
                                       {"Content-Type": "application/json"}, self._timeout)
+            if not isinstance(data, dict):
+                data = {}
             if "p-ticket" in data:
                 if data.get("p-captcha"):
                     server_msg = data.get("p-message") or ""
@@ -222,6 +230,8 @@ class TokenManager:
             status, data = self._http("GET", url, None, headers, self._timeout)
             if status in (404, 405):
                 status, data = self._http("POST", url, {}, headers, self._timeout)
+            if not isinstance(data, dict):
+                data = {}
             if status == 200 and data.get("accessToken"):
                 self._store_locked(data)
                 self._log("Tradovate: access token renewed.")
