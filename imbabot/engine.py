@@ -188,7 +188,11 @@ class BotEngine:
                 self.contract.id, start, end, live=self.settings.use_live_data
             )
         except Exception as exc:
-            self.log(f"overnight_range unavailable: {exc}", "warn")
+            # Log once, not per 5s poll (a Tradovate session spammed 6,699
+            # copies of the "not supported" warning on 2026-07-19).
+            if not getattr(self, "_range_warned", False):
+                self._range_warned = True
+                self.log(f"overnight_range unavailable: {exc}", "warn")
             return None
 
     def dashboard(self) -> Dict[str, Any]:

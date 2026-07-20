@@ -90,10 +90,14 @@ class Api:
             self._tick_stop.wait(5.0)
 
     def _poll_worker(self) -> None:
-        while not self._poll_stop.is_set() and self.engine:
+        # Bound to ONE engine: exits when the engine is replaced, so re-connects
+        # never stack pollers (stacked pollers rate-limited the TopStep feed
+        # into HTTP 429 on 2026-07-19).
+        eng = self.engine
+        while not self._poll_stop.is_set() and self.engine is eng and eng is not None:
             try:
-                self._last_price = self.engine.last_price()
-                self._range = self.engine.overnight_range()
+                self._last_price = eng.last_price()
+                self._range = eng.overnight_range()
             except Exception:
                 pass
             self._poll_stop.wait(5.0)
@@ -171,6 +175,26 @@ class Api:
             return {"ok": True, "contract": contract_txt}
 
     # -------------------------------------------------------------- connect
+    def _retire_engine(self) -> None:
+        """Shut down a previous engine before a re-connect. Leaked clients kept
+        their WebSocket reconnect loops alive with stale tokens (endless 401s
+        that also burn Tradovate's ~5 auth attempts/hour budget)."""
+        if self.engine is None:
+            return
+        self._poll_stop.set()
+        try:
+            if self.engine.armed:
+                self.engine.disarm()
+        except Exception:
+            pass
+        close = getattr(self.engine.client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+        self.engine = None
+
     def connect(self, payload: dict, api_key: str, remember: bool) -> dict:
         with self._lock:
             # Secrets NEVER pass through _apply_settings (they'd land in settings.json).
@@ -179,6 +203,7 @@ class Api:
             err = self._apply_settings(payload)
             if err:
                 return {"ok": False, "error": err}
+            self._retire_engine()
             s = self.settings
             s.save()
             if s.backend == "tradovate":

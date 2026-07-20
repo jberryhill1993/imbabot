@@ -1130,6 +1130,42 @@ def run_selftest() -> int:
     _check("tdv feed: public source never touches TopStep",
            feed4.last_price() == 21060.0 and not px_calls)
 
+    # feed hardening (live-found 2026-07-19): 429 backoff, one-time public
+    # warning, and a short cache for the engine's back-to-back capture probes.
+    px429 = {"n": 0}
+    class _Px429:
+        authenticated = True
+        def resolve_contract(self, symbol, live=False):
+            return type("C", (), {"id": "PX1", "name": "NQU6"})()
+        def last_price(self, cid, live=False):
+            px429["n"] += 1
+            raise RuntimeError("HTTP 429 from /api/History/retrieveBars")
+    warnsf = []
+    fclock = [1000.0]
+    feed5 = ReferencePriceFeed(s_pf, log=lambda m, level="info": warnsf.append(m),
+                               px_client=_Px429(), quote_fn=lambda: 21070.0)
+    feed5._clock = lambda: fclock[0]
+    _check("tdv feed: 429 -> public fallback", feed5.last_price() == 21070.0)
+    fclock[0] += 3.0
+    feed5.last_price()
+    fclock[0] += 3.0
+    feed5.last_price()
+    _check("tdv feed: 429 backoff stops hammering TopStep",
+           px429["n"] == 1, f"px calls={px429['n']}")
+    _check("tdv feed: public-quote warning logged once, not per poll",
+           sum(1 for m in warnsf if "PUBLIC" in m) == 1)
+    qcalls = {"n": 0}
+    def _qf():
+        qcalls["n"] += 1
+        return 21080.0
+    feed6 = ReferencePriceFeed(Settings(backend="tradovate", tdv_price_source="public"),
+                               quote_fn=_qf)
+    feed6._clock = lambda: 5000.0
+    feed6.last_price()
+    feed6.last_price()
+    _check("tdv feed: short cache serves back-to-back capture probes",
+           qcalls["n"] == 1, f"quote calls={qcalls['n']}")
+
     # client dispatch: topstep source serves the price with the MD socket OFF
     warns_pf = []
     s_cd = Settings(backend="tradovate", tdv_username="u", tdv_price_source="topstep")

@@ -18,7 +18,15 @@ market-data WebSocket (for accounts that DO hold the CME sub-vendor license).
 """
 from __future__ import annotations
 
+import time as _time
 from typing import Any, Callable, Optional
+
+# Serve a just-fetched price for this long (the engine's capture probes the
+# feed twice back-to-back; the dashboard polls every 5s so it always refetches).
+_CACHE_SECONDS = 2.0
+# After a TopStep HTTP 429 (rate limit), serve the public quote for this long
+# instead of hammering ProjectX.
+_PX_BACKOFF_SECONDS = 60.0
 
 
 class ReferencePriceFeed:
@@ -38,6 +46,10 @@ class ReferencePriceFeed:
         self._px_state = "unset"          # unset | ready | unavailable
         self._px_contract: Any = None
         self.last_source: Optional[str] = None   # "topstep" | "public"
+        self._clock = _time.time
+        self._cache: Optional[tuple] = None      # (ts, price)
+        self._px_backoff_until = 0.0
+        self._public_warned = False
 
     # ------------------------------------------------------------ sources
     def _ensure_px(self) -> Any:
@@ -80,23 +92,38 @@ class ReferencePriceFeed:
     # ------------------------------------------------------------- public
     def last_price(self) -> float:
         s = self._settings
+        now = self._clock()
+        if self._cache is not None and now - self._cache[0] < _CACHE_SECONDS:
+            return self._cache[1]
         source = getattr(s, "tdv_price_source", "topstep") or "topstep"
-        if source != "public":
+        if source != "public" and now >= self._px_backoff_until:
             px = self._ensure_px()
             if px is not None:
                 try:
                     price = float(px.last_price(self._px_contract.id,
                                                 live=s.use_live_data))
                     self.last_source = "topstep"
+                    self._cache = (now, price)
+                    self._public_warned = False
                     return price
                 except Exception as exc:
-                    self._log(f"TopStep price fetch failed ({exc}) — trying "
-                              f"the public quote.", "warning")
+                    if "429" in str(exc):
+                        # Rate-limited: stop hammering ProjectX for a while.
+                        self._px_backoff_until = now + _PX_BACKOFF_SECONDS
+                        self._log(f"TopStep feed rate-limited (429) — using the "
+                                  f"public quote for {_PX_BACKOFF_SECONDS:.0f}s.",
+                                  "warning")
+                    else:
+                        self._log(f"TopStep price fetch failed ({exc}) — trying "
+                                  f"the public quote.", "warning")
         price = self._quote_fn()
         if price is not None:
             self.last_source = "public"
-            self._log("Reference price via PUBLIC NQ quote — may lag a few "
-                      "seconds at the bell.", "warning")
+            if not self._public_warned:   # once per outage, not per 5s poll
+                self._public_warned = True
+                self._log("Reference price via PUBLIC NQ quote — may lag a few "
+                          "seconds at the bell.", "warning")
+            self._cache = (now, float(price))
             return float(price)
         raise RuntimeError(
             "No reference price available (TopStep feed and the public NQ "

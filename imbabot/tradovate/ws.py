@@ -254,6 +254,7 @@ class TdvSocket(threading.Thread):
         self.cache = UserSyncCache(on_kill=on_kill) if kind == "user" else None
         self.quotes = QuoteCache()
         self.healthy = False
+        self._had_session = False
         self._closing = False
         self._ws: Any = None
         self._req_id = 0
@@ -284,12 +285,35 @@ class TdvSocket(threading.Thread):
     # -- thread body -------------------------------------------------------
     def run(self) -> None:  # pragma: no cover (network; demo probe exercises it)
         attempt = 0
+        auth_failures = 0
         while not self._closing:
+            self._had_session = False
             try:
                 self._session()
-                attempt = 0                       # clean session -> reset backoff
             except Exception as exc:
-                self._log(f"Tradovate {self.kind} socket dropped: {exc}", "warning")
+                msg = str(exc)
+                self._log(f"Tradovate {self.kind} socket dropped: {msg}", "warning")
+                if "401" in msg or "access is denied" in msg.lower():
+                    # Stale/superseded token (e.g. a re-connect acquired a new
+                    # one). Invalidate ONCE so the next attempt re-acquires;
+                    # give up after 3 strikes — each re-acquire spends one of
+                    # Tradovate's ~5 auth attempts/hour, and the client's REST
+                    # fallback keeps orders/positions visible without us.
+                    auth_failures += 1
+                    if auth_failures == 1:
+                        try:
+                            self._tokens.invalidate()
+                        except Exception:
+                            pass
+                    elif auth_failures >= 3:
+                        self._log(
+                            f"Tradovate {self.kind} socket stopping after repeated "
+                            f"authorize failures — REST fallback stays active. "
+                            f"Reconnect the bot to retry.", "error")
+                        break
+            if self._had_session:                 # we got healthy this round
+                attempt = 0
+                auth_failures = 0
             self.healthy = False
             if self._closing:
                 break
@@ -322,6 +346,7 @@ class TdvSocket(threading.Thread):
                 for symbol in list(self._subs):
                     self._call(ws, "md/subscribeQuote", body={"symbol": symbol})
             self.healthy = True
+            self._had_session = True              # reached healthy -> reset backoff
             self._log(f"Tradovate {self.kind} socket connected.", "info")
             self._receive_loop(ws)
         finally:
