@@ -207,6 +207,7 @@ class Api:
                 engine.connect(key)
                 accounts = engine.list_accounts()
             except Exception as exc:
+                self.log(f"Connect failed: {exc}", "error")
                 return {"ok": False, "error": str(exc)}
             self.engine, self.accounts = engine, accounts
             self._poll_stop.clear()
@@ -249,6 +250,7 @@ class Api:
             engine.connect(secrets.get("password", ""))
             accounts = engine.list_accounts()
         except Exception as exc:
+            self.log(f"Tradovate connect failed: {exc}", "error")
             return {"ok": False, "error": str(exc)}
         self.engine, self.accounts = engine, accounts
         s.save()   # persists the auto-generated tdv_device_id

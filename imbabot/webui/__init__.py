@@ -30,9 +30,14 @@ def run_webui() -> int:
         return classic_main()
 
     from .. import __version__
+    from ..config import config_dir
     from .bridge import Api
 
     api = Api()
+    # First line of every session -> the file log, so a session is never
+    # invisible from outside (diagnosed 2026-07-19: a failed-connect session
+    # left zero trace on disk).
+    api.log(f"Imbabot {__version__} ready (web UI). Config: {config_dir()}")
     index = _static_dir() / "index.html"
     window = webview.create_window(
         f"Imbabot {__version__}",
