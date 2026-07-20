@@ -56,9 +56,20 @@ def md_ws_url(environment: str) -> str:
 # ------------------------------------------------------------------ codec
 def encode_request(endpoint: str, req_id: int, query: str = "",
                    body: Any = None) -> str:
-    """``endpoint\\n<id>\\n<query>\\n<body-json>`` (trailing parts optional)."""
+    """``endpoint\\n<id>\\n<query>\\n<body>``.
+
+    Dict/list bodies are JSON-encoded; STRING bodies are sent RAW — the
+    ``authorize`` endpoint requires the bare token in the body slot without
+    JSON quoting (verified live 2026-07-19: a quoted or query-slot token gets
+    401 "Access is denied").
+    """
     parts = [endpoint, str(req_id), query or ""]
-    parts.append("" if body is None else json.dumps(body))
+    if body is None:
+        parts.append("")
+    elif isinstance(body, str):
+        parts.append(body)
+    else:
+        parts.append(json.dumps(body))
     return "\n".join(parts)
 
 
@@ -335,7 +346,7 @@ class TdvSocket(threading.Thread):
             # long disconnect; TokenManager renews as needed.
             token = (self._tokens.md_token() if self.kind == "md"
                      else self._tokens.access_token())
-            self._call(ws, "authorize", query=token)
+            self._call(ws, "authorize", body=token)   # RAW token in the body slot
             if self.kind == "user":
                 uid = getattr(self._tokens, "user_id", None)
                 body = {"users": [uid]} if uid is not None else {"users": []}

@@ -485,8 +485,11 @@ class TradovateClient:
             body["price"] = limit_price
         if stop_price is not None:
             body["stopPrice"] = stop_price
-        if custom_tag:
-            body["customTag50"] = str(custom_tag)[:50]
+        # NOTE: customTag50 is deliberately NOT sent. On Tradovate, Tag 50 is
+        # the CME-registered operator id — an arbitrary label is rejected with
+        # "Unregisted Tag50" (live-found 2026-07-19). Omitting it lets the
+        # venue stamp the account's registered operator; the bot's tags remain
+        # log-only on this backend.
         data = self._request("POST", "/order/placeorder", body=body)
         return self._order_result(data)
 
@@ -514,8 +517,7 @@ class TradovateClient:
         }
         if leg.limit_price is not None:
             body["price"] = leg.limit_price
-        if leg.custom_tag:
-            body["customTag50"] = str(leg.custom_tag)[:50]
+        # customTag50 omitted on purpose — see place_order (CME Tag 50).
 
         exit_action = _exit_action(leg.side)
         brackets: List[Dict[str, Any]] = []

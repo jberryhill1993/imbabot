@@ -870,9 +870,10 @@ def run_selftest() -> int:
     _check("tdv OSO body: symbol/action/type",
            oso["symbol"] == "MNQU6" and oso["action"] == "Buy"
            and oso["orderType"] == "Stop" and oso["stopPrice"] == 21012.0)
-    _check("tdv OSO body: isAutomated + accountSpec + customTag50",
+    _check("tdv OSO body: isAutomated + accountSpec, NO customTag50 (CME Tag 50 "
+           "is a registered operator id — live-rejected 'Unregisted Tag50')",
            oso["isAutomated"] is True and oso["accountSpec"] == "DEMO7001"
-           and oso["customTag50"] == "imba-t")
+           and "customTag50" not in oso)
     _check("tdv OSO bracket1 = protective sell stop @21000",
            oso["bracket1"] == {"action": "Sell", "orderType": "Stop",
                                "stopPrice": 21000.0}, f"got {oso['bracket1']}")
@@ -963,8 +964,12 @@ def run_selftest() -> int:
     _check("tdv ws urls: live", user_ws_url("live").startswith("wss://live.")
            and md_ws_url("live").startswith("wss://md."))
 
-    _check("tdv ws encode: authorize framing",
-           encode_request("authorize", 1, "tok-X") == "authorize\n1\ntok-X\n")
+    # authorize framing: RAW token in the BODY slot, never JSON-quoted, never
+    # in the query slot (live-found 2026-07-19: both variants get 401).
+    _check("tdv ws encode: authorize = raw token in body slot",
+           encode_request("authorize", 1, body="tok-X") == "authorize\n1\n\ntok-X")
+    _check("tdv ws encode: string bodies are never JSON-quoted",
+           '"' not in encode_request("authorize", 1, body="tok-X"))
     _check("tdv ws encode: body json",
            encode_request("user/syncrequest", 2, body={"users": [5]})
            == 'user/syncrequest\n2\n\n{"users": [5]}')
