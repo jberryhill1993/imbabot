@@ -1467,5 +1467,61 @@ def run_selftest() -> int:
     _check("bridge $ mode: unknown symbol root errors cleanly",
            isinstance(err2, str) and "ZZZ" in err2, f"got {err2}")
 
+    # 15) live-trade journal — real trades vs Morning-Plan predictions
+    from .analysis.live_journal import (LiveTrade, actual_dict, append_trade,
+                                        dollars_per_point, load_journal, scorecard)
+    _check("journal $/pt: NQ=20, MNQ=2, full names",
+           dollars_per_point("NQ") == 20 and dollars_per_point("MNQ") == 2
+           and dollars_per_point("NQU6") == 20)
+
+    # the real 7/21 loss: long 29,224.75 -> stop 29,217.00, 4ct NQ
+    t721 = LiveTrade(date="2026-07-21", backend="topstep", decision="TRADE",
+                     conviction="MODERATE", predicted_spike=25, side="long",
+                     entry_fill=29224.75, sl_price=29217.25, tp_price=29233.00,
+                     exit_price=29217.00, exit_reason="sl", contracts=4,
+                     dollars_per_point=20.0).finalize()
+    _check("journal gross P&L (7/21 long loss)", t721.gross_pnl() == -620.0,
+           f"got {t721.gross_pnl()}")
+    _check("journal net P&L subtracts commission",
+           abs(t721.net_pnl() - (-620.0 - 4 * 2.6)) < 1e-6, f"got {t721.net_pnl()}")
+    _check("journal outcome derived = loss", t721.outcome == "loss")
+
+    # short winner mirror
+    tw = LiveTrade(date="2026-07-22", side="short", entry_fill=21000.0,
+                   exit_price=20990.0, contracts=2, dollars_per_point=20.0).finalize()
+    _check("journal short win: (entry-exit) positive", tw.gross_pnl() == 400.0
+           and tw.outcome == "win", f"got {tw.gross_pnl()}/{tw.outcome}")
+    # scratch + no-fill
+    tsc = LiveTrade(date="2026-07-23", side="long", entry_fill=21000.0,
+                    exit_price=21000.0, contracts=1, dollars_per_point=20.0).finalize()
+    _check("journal scratch when net within threshold", tsc.outcome == "scratch")
+    tnf = LiveTrade(date="2026-07-24", side="none").finalize()
+    _check("journal no-fill when nothing filled",
+           tnf.outcome == "no-fill" and tnf.net_pnl() is None)
+
+    # persistence round-trip + dedupe + scorecard (redirected config dir)
+    import json as _j
+    jdir = tempfile.mkdtemp(prefix="imbabot-journal-")
+    os.environ["IMBABOT_CONFIG_DIR"] = jdir
+    try:
+        append_trade(t721)
+        append_trade(tw)
+        append_trade(t721)                       # exact dup -> replace, not add
+        loaded = load_journal()
+        _check("journal round-trip + dedupe (2 unique)", len(loaded) == 2,
+               f"got {len(loaded)}")
+        sc = scorecard()
+        _check("journal scorecard: 1W-1L, win% 50",
+               sc.wins == 1 and sc.losses == 1 and sc.win_rate == 50.0)
+        _check("journal scorecard: net = -630.4 + 394.8 = -235.6 (both after commission)",
+               abs(sc.total_net - (-630.4 + 394.8)) < 1e-6, f"got {sc.total_net}")
+        _check("journal actual_dict maps date->net",
+               abs(actual_dict()["2026-07-21"] - (-630.4)) < 1e-6,
+               f"got {actual_dict().get('2026-07-21')}")
+        _check("journal TRADE-call accuracy tracked",
+               sc.trade_calls == 1 and sc.trade_call_wins == 0)
+    finally:
+        os.environ["IMBABOT_CONFIG_DIR"] = tmp   # restore selftest's throwaway dir
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

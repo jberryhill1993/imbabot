@@ -83,6 +83,16 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
   result against the live public NQ quote: >5 pt divergence → the quote wins,
   loudly logged.
 
+### Added — live-trade journal (`journal` CLI)
+- Records REAL morning trades (entry/SL/TP/exit fills, contracts) and scores
+  them against the Morning-Plan prediction — the first place actual fills are
+  persisted (the model itself is validated only on simulated tick outcomes).
+  `journal add …` logs one trade + net P&L + win/loss/whipsaw; `journal show`
+  prints the log + a scorecard (record, win% vs the ~56-58% TRADE-day
+  expectation, net $, TRADE-call accuracy). `analyze-ticks --target --date`
+  now shows the real journal $ next to the simulated figure for shared dates.
+  Seeded with 7/21 (TopStep, 4ct NQ, TRADE/whipsaw, −$630).
+
 ### Changed — Tue 2026-07-21 findings: venue-true reference via CME sub
 - Tue's open proved BOTH free feeds (TopStep sim bars, public quote) lag
   10–15pt on fast tape: the buy-stop was placed behind the market and

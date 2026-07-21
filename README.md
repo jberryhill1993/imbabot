@@ -109,6 +109,18 @@ rating, and a **TRADE / SKIP** call — plus a profit-target box that suggests *
 the **TopStep $ brackets** to set. It is **advisory only**: the bot never changes your settings;
 you review the numbers and enter them yourself.
 
+**Live-trade journal.** Record each real morning trade and score it against the prediction:
+```
+python -m imbabot.cli journal add --date 2026-07-21 --decision TRADE --spike 25 \
+    --side long --entry 29224.75 --sl 29217.25 --tp 29233.00 --exit 29217.00 \
+    --exit-reason sl --contracts 4 --symbol NQ --note "whipsaw"
+python -m imbabot.cli journal show      # every logged trade + the live scorecard
+```
+The scorecard tracks real win-rate vs the model's ~56–58% TRADE-day expectation, net P&L, and
+TRADE-call accuracy. This is separate from the tick model (which learns from Databento tick files);
+once a date's tick file is ingested, `analyze-ticks --target … --date …` shows the real journal $
+alongside the simulated figure.
+
 Setup (one time): obtain historical 1-second NQ bars (Databento `ohlcv-1s`, CSV) and ingest +
 calibrate:
 ```

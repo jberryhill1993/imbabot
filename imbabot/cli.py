@@ -359,6 +359,39 @@ def cmd_recommend(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_journal(args: argparse.Namespace) -> int:
+    """Live-trade journal: record REAL trades and score them against predictions."""
+    from .analysis.live_journal import (LiveTrade, append_trade, dollars_per_point,
+                                        format_trade, load_journal, scorecard)
+    if args.action == "add":
+        if not args.date:
+            print("journal add: --date is required.")
+            return 1
+        t = LiveTrade(
+            date=args.date, backend=args.backend, decision=args.decision,
+            conviction=args.conviction, predicted_spike=args.spike,
+            reference=args.reference, side=args.side, entry_fill=args.entry,
+            sl_price=args.sl, tp_price=args.tp, exit_price=args.exit_price,
+            exit_reason=args.exit_reason, contracts=args.contracts,
+            dollars_per_point=dollars_per_point(args.symbol),
+            overnight_gap=args.gap, notes=args.note,
+        ).finalize()
+        append_trade(t)
+        print("Logged:\n  " + format_trade(t) + "\n")
+    trades = load_journal()
+    if not trades:
+        print("No live trades logged yet. Add one with:  journal add --date ... "
+              "--side long --entry ... --exit ... --contracts ...")
+        return 0
+    print("LIVE TRADE JOURNAL")
+    print("=" * 78)
+    for t in trades:
+        print("  " + format_trade(t))
+    print()
+    print(scorecard(trades).text)
+    return 0
+
+
 def cmd_analyze_ticks(args: argparse.Namespace) -> int:
     """Tick-data Morning analysis: ingest, (re)fit the spike predictor, walk-forward, report."""
     from .analysis.tick_runner import morning_plan
@@ -396,6 +429,11 @@ def cmd_analyze_ticks(args: argparse.Namespace) -> int:
         print(f"  News: {mp.news_label}")
         print(f"  Size: {sz}")
         print(f"  {mp.rationale}")
+        # If a REAL trade was logged for this date, show what actually happened.
+        from .analysis.live_journal import actual_dict
+        real = actual_dict().get(date)
+        if real is not None:
+            print(f"  ACTUAL (journal): ${real:,.2f}")
     return 0
 
 
@@ -484,6 +522,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--date", help="date for the Morning Plan (default: latest cached)")
     sp.add_argument("--max-contracts", type=int, default=10, help="contract cap (default 10)")
     sp.set_defaults(func=cmd_analyze_ticks)
+
+    sp = sub.add_parser("journal", help="live-trade journal: log real trades vs predictions")
+    sp.add_argument("action", nargs="?", choices=["show", "add"], default="show")
+    sp.add_argument("--date", help="session date, ISO (add)")
+    sp.add_argument("--backend", default="topstep", choices=["topstep", "tradovate", "demo"])
+    sp.add_argument("--decision", default="", help="Morning Plan call (TRADE / NO-TRADE)")
+    sp.add_argument("--conviction", default="", help="LOW / MODERATE / STRONG")
+    sp.add_argument("--spike", type=float, default=0.0, help="predicted spike (pts)")
+    sp.add_argument("--reference", type=float, help="captured reference price")
+    sp.add_argument("--side", default="none", choices=["long", "short", "none"])
+    sp.add_argument("--entry", type=float, help="entry fill price")
+    sp.add_argument("--sl", type=float, help="stop-loss price")
+    sp.add_argument("--tp", type=float, help="take-profit price")
+    sp.add_argument("--exit", type=float, dest="exit_price", help="exit fill price")
+    sp.add_argument("--exit-reason", default="", choices=["", "tp", "sl", "manual", "no-fill"])
+    sp.add_argument("--contracts", type=int, default=0)
+    sp.add_argument("--symbol", default="NQ", help="root symbol for $/point (NQ/MNQ/...)")
+    sp.add_argument("--gap", type=float, help="overnight gap (pts)")
+    sp.add_argument("--note", default="", help="free-text note")
+    sp.set_defaults(func=cmd_journal)
 
     sp = sub.add_parser("selftest", help="run offline checks (no network)")
     sp.set_defaults(func=cmd_selftest)
