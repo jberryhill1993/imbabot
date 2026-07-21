@@ -808,6 +808,8 @@ def run_selftest() -> int:
                 return 200, {"commandId": 55}
             if path == "order/liquidateposition":
                 return 200, {"orderId": 130}
+            if path == "order/item":
+                return 200, {"id": int(url.split("id=")[-1]), "ordStatus": "Rejected"}
             if path == "order/list":
                 return 200, [{"id": 111, "accountId": 7001, "ordStatus": "Working",
                               "action": "Buy", "contractId": 901},
@@ -1208,6 +1210,45 @@ def run_selftest() -> int:
     _check("tdv feed: divergence warned",
            any("away from the live public quote" in m for m in dwarns))
 
+    # entry_status: no WS -> REST /order/item fallback (scripted "Rejected")
+    _check("tdv client entry_status via REST fallback",
+           cl.entry_status(111) == "Rejected")
+
+    # MD-path resilience: source="tradovate" with no usable quote falls back to
+    # the free-feed chain instead of dying (the fire must never abort on data).
+    s_md = Settings(backend="tradovate", tdv_username="u",
+                    tdv_price_source="tradovate")
+    md_warns = []
+    cl_md = TradovateClient(s_md, log=lambda m, level="info": md_warns.append(m),
+                            http=_Rest(), enable_ws=False)
+    cl_md.authenticate("u", "pw")
+    cl_md.resolve_contract("MNQ")
+    class _FeedStub:
+        def last_price(self):
+            return 21042.5
+    cl_md._price_feed = _FeedStub()
+    _check("tdv md-path falls back to the free-feed chain",
+           cl_md.last_price("901") == 21042.5)
+    _check("tdv md-path fallback warns",
+           any("falling back to the TopStep/public price chain" in m for m in md_warns))
+
+    # divergence log: rate-limited to 30s, NOT once-per-episode (fire-time
+    # captures must always log their decision — silent 7/21 pick cost time)
+    dlog = []
+    dclock = [10_000.0]
+    feed10 = ReferencePriceFeed(s_pf, log=lambda m, level="info": dlog.append(m),
+                                px_client=_PxTier(), quote_fn=lambda: 21055.0)
+    feed10._clock = lambda: dclock[0]
+    feed10.last_price()
+    dclock[0] += 3.0
+    feed10.last_price()
+    n_early = sum(1 for m in dlog if "away from the live public quote" in m)
+    dclock[0] += 31.0
+    feed10.last_price()
+    n_late = sum(1 for m in dlog if "away from the live public quote" in m)
+    _check("tdv feed: divergence line rate-limited (1 within 30s, 2 after)",
+           n_early == 1 and n_late == 2, f"early={n_early} late={n_late}")
+
     # client dispatch: topstep source serves the price with the MD socket OFF
     warns_pf = []
     s_cd = Settings(backend="tradovate", tdv_username="u", tdv_price_source="topstep")
@@ -1332,6 +1373,31 @@ def run_selftest() -> int:
     _check("tdv OCO cancel error: first scan retries, second succeeds",
            r1 is False and r2 is True and short_oid in ft.cancelled,
            f"r1={r1} r2={r2} cancelled={ft.cancelled}")
+
+    # Tue 7/21 regression — ASYNC venue reject -> STAND DOWN: Tradovate accepts
+    # an entry by REST then rejects it (stale-low reference behind the market);
+    # the bot must cancel the survivor and stop, never leaving a one-sided
+    # straddle resting.
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
+    ft.simulate_reject(long_oid)                 # BUY rejected async
+    acted = eng._oco_scan(plan, eng.account.id, eng.contract.id, set())
+    _check("tdv reject: survivor cancelled + stand down",
+           acted is True and short_oid in ft.cancelled
+           and long_oid not in ft.cancelled,
+           f"acted={acted} cancelled={ft.cancelled}")
+    n_placed = len(ft.placed)
+    _check("tdv reject: NO re-placement (stand down, not chase)",
+           n_placed == 2, f"placed={n_placed}")
+    _check("tdv reject: fake reports venue statuses",
+           ft.entry_status(long_oid) == "Rejected"
+           and ft.entry_status(short_oid) == "Canceled")
+
+    # FakeClient (TopStep) has no entry_status -> path byte-identical (probe skipped)
+    _check("topstep path: no entry_status probe on FakeClient",
+           not callable(getattr(FakeClient(), "entry_status", None)))
 
     # full-size parity: the user's real 4-contract straddle places unchanged
     eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade", contracts=4)

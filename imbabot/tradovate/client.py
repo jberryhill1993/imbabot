@@ -397,6 +397,11 @@ class TradovateClient:
         self._contracts[contract.id] = {
             "id": int(chosen["id"]), "name": contract.name, "tick": tick_size,
         }
+        # Pre-subscribe quotes at resolve time (source="tradovate") so the
+        # stream is warm long before the 08:29:59 capture — never a cold
+        # subscribe in the fire path.
+        if self._md_ws is not None:
+            self._md_ws.subscribe_quote(contract.name, int(chosen["id"]))
         return contract
 
     def _product_ticks(self, root: str) -> Tuple[float, float]:
@@ -438,15 +443,28 @@ class TradovateClient:
             except Exception as exc:
                 raise TradovateError(str(exc)) from exc
         info = self._contract_info(contract_id)
-        if self._md_ws is None:
-            raise TradovateError("Market-data socket not connected.")
-        self._md_ws.subscribe_quote(info["name"], info["id"])
-        price = self._md_ws.quotes.last_price(info["name"])
-        if price is None:
-            raise TradovateError(
-                f"No fresh Tradovate quote for {info['name']} (tdv_price_source="
-                f"'tradovate' needs the CME sub-vendor license on this API key).")
-        return price
+        price = None
+        if self._md_ws is not None:
+            self._md_ws.subscribe_quote(info["name"], info["id"])
+            price = self._md_ws.quotes.last_price(info["name"])
+        if price is not None:
+            return price
+        # The fire must never die on a data hiccup: fall back to the free-feed
+        # chain (TopStep bars -> public quote) with a loud (rate-limited) warning.
+        import time as _t
+        if _t.time() - getattr(self, "_md_fallback_warn_ts", 0.0) >= 60.0:
+            self._md_fallback_warn_ts = _t.time()
+            self._log(
+                f"No fresh Tradovate quote for {info['name']} "
+                f"{'(MD socket not connected)' if self._md_ws is None else '(stale/license-gated)'}"
+                f" — falling back to the TopStep/public price chain.", "warning")
+        if self._price_feed is None:
+            from .pricefeed import ReferencePriceFeed
+            self._price_feed = ReferencePriceFeed(self._settings, self._log)
+        try:
+            return self._price_feed.last_price()
+        except Exception as exc:
+            raise TradovateError(str(exc)) from exc
 
     def session_range(self, contract_id, start, end, live: bool = False):
         raise TradovateError("session_range is not supported on the Tradovate "
@@ -621,6 +639,29 @@ class TradovateClient:
         if self._user_ws is not None and self._user_ws.healthy:
             return self._user_ws.cache.rows(kind)
         return list(self._request("GET", rest_path) or [])
+
+    def entry_status(self, order_id: int) -> Optional[str]:
+        """The venue's ordStatus for one of OUR orders ("Working", "Filled",
+        "Rejected", ...) or None if unknown. Duck-typed OPTIONAL — the engine
+        probes for it with getattr; ProjectX has no equivalent (its rejects
+        are synchronous), so the TopStep path is untouched.
+
+        Added after Tue 2026-07-21: Tradovate rejects ASYNC (placeorder
+        returns an orderId, then the order goes to Rejected), so a stale-low
+        reference left a one-sided straddle resting with nobody noticing.
+        """
+        if self._user_ws is not None:
+            for o in self._user_ws.cache.rows("orders"):
+                if int(o.get("id", -1)) == int(order_id):
+                    return o.get("ordStatus")
+        try:
+            item = self._request("GET", "/order/item",
+                                 params={"id": int(order_id)}) or {}
+            if isinstance(item, dict):
+                return item.get("ordStatus")
+        except TradovateError:
+            pass
+        return None
 
     def _order_snapshot(self, order_id: int) -> Dict[str, Any]:
         if self._user_ws is not None and self._user_ws.healthy:

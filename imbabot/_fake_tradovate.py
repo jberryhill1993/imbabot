@@ -30,6 +30,7 @@ class FakeTradovate:
         self.cancelled: List[int] = []
         self.liquidated: List[str] = []
         self.positions: List[Dict[str, Any]] = []       # Tradovate-shaped rows
+        self.statuses: Dict[int, str] = {}              # id -> ordStatus (venue view)
         self._lock = threading.Lock()
         self.authenticated = False
         self.session_secrets: Dict[str, Any] = {}
@@ -76,6 +77,7 @@ class FakeTradovate:
             rec["ordStatus"] = "Working"
             self.orders[oid] = rec
             self.placed.append(rec)
+            self.statuses[oid] = "Working"
         return OrderResult(order_id=oid, success=True, error_code=0, error_message=None)
 
     def place_straddle_leg(self, account_id: int, contract_id: str,
@@ -123,7 +125,12 @@ class FakeTradovate:
         with self._lock:
             self.orders.pop(order_id, None)
             self.cancelled.append(order_id)
+            self.statuses[order_id] = "Canceled"
         return True
+
+    def entry_status(self, order_id: int):
+        """Mirror TradovateClient.entry_status (venue ordStatus or None)."""
+        return self.statuses.get(int(order_id))
 
     def liquidate_position(self, account_id: int, contract_id: Any) -> OrderResult:
         with self._lock:
@@ -157,3 +164,11 @@ class FakeTradovate:
             for oid, rec in list(self.orders.items()):
                 if rec.get("side") == filled_side:
                     self.orders.pop(oid)
+                    self.statuses[oid] = "Filled"
+
+    def simulate_reject(self, order_id: int) -> None:
+        """The venue rejects an entry ASYNC (accepted by REST, then Rejected) —
+        the Tue 2026-07-21 live scenario."""
+        with self._lock:
+            self.orders.pop(int(order_id), None)
+            self.statuses[int(order_id)] = "Rejected"

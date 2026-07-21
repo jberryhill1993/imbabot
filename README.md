@@ -259,10 +259,14 @@ orders — so keep the bot SL/TP toggles ON for Tradovate; a naked entry there i
 truly naked (the bot warns loudly). Also set Tradovate's own account risk
 settings as the platform-side backstop.
 
-**Reference-price sanity.** The straddle executes on Tradovate's real book, so
-the TopStep-sourced reference is cross-checked against the live public NQ quote
-at capture time; if they diverge by more than 5 points (stale pre-open bar),
-the quote is used instead and the log says so.
+**Reference-price sanity.** The straddle executes on Tradovate's real book —
+live testing (2026-07-20/21) showed the free feeds (TopStep bars, public quote)
+can lag 10–15pt on fast opens, mis-centering the straddle. The recommended
+Price source is therefore **"Tradovate data"** (requires the CME sub-vendor
+registration): venue-true quotes over the MD socket, pre-subscribed at connect,
+with the TopStep/public chain as automatic fallback. If a stale reference ever
+gets an entry REJECTED by the venue, the bot cancels the surviving leg and
+stands down for that fire (no one-sided straddle, no chasing).
 
 **Entering SL/TP in dollars.** To mirror the TopStep Position-Brackets workflow,
 switch "SL/TP entered as" to **$ per position** and type dollar amounts (e.g.

@@ -412,6 +412,39 @@ class BotEngine:
         a not-yet-propagated entry's absence as a fill.
         """
         our_ids = {leg.order_id for leg in plan.legs if leg.order_id is not None}
+
+        # Venue-side ASYNC rejects (Tradovate; live 2026-07-21): an entry can be
+        # accepted by REST then go to Rejected — the old code never noticed and
+        # left a stale one-sided straddle resting. Clients that can report an
+        # order's status expose entry_status(); on a rejected entry we cancel
+        # every survivor and STAND DOWN (no trade today, no chasing).
+        status_probe = getattr(self.client, "entry_status", None)
+        if callable(status_probe):
+            for leg in plan.legs:
+                if leg.order_id is None:
+                    continue
+                try:
+                    status = status_probe(leg.order_id)
+                except Exception:
+                    status = None
+                if status and "reject" in str(status).lower():
+                    self.log(
+                        f"{leg.side.name} entry orderId={leg.order_id} was REJECTED "
+                        f"by the venue (reference was behind the market). Cancelling "
+                        f"the survivor and STANDING DOWN — no trade this fire.",
+                        "error")
+                    for other in plan.legs:
+                        oid = other.order_id
+                        if oid is None or oid == leg.order_id:
+                            continue
+                        try:
+                            self.client.cancel_order(acct, oid)
+                            self.log(f"Cancelled {other.side.name} entry orderId={oid}.")
+                        except Exception as exc:
+                            self.log(f"Failed to cancel {other.side.name} entry "
+                                     f"{oid}: {exc}", "error")
+                    return True
+
         try:
             open_ids = {_order_id(o) for o in self.client.search_open_orders(acct)}
         except Exception as exc:

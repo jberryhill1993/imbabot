@@ -83,6 +83,22 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
   result against the live public NQ quote: >5 pt divergence → the quote wins,
   loudly logged.
 
+### Changed — Tue 2026-07-21 findings: venue-true reference via CME sub
+- Tue's open proved BOTH free feeds (TopStep sim bars, public quote) lag
+  10–15pt on fast tape: the buy-stop was placed behind the market and
+  REJECTED async, leaving a stale one-sided straddle. User decision:
+  register the CME sub-vendor (~$290/mo) and use `tdv_price_source=
+  "tradovate"` (the venue's own MD socket) as the primary reference.
+- MD-path hardening: quotes pre-subscribe at contract resolution (stream is
+  warm before the capture); a stale/missing quote falls back to the
+  TopStep/public chain with a rate-limited warning instead of aborting.
+- **Reject stand-down net**: new `TradovateClient.entry_status()` (WS cache
+  → REST /order/item); the OCO monitor probes it (optional, duck-typed —
+  TopStep path untouched) and on an async-REJECTED entry cancels the
+  survivor and stands down loudly. No chasing.
+- Divergence/fallback log lines are rate-limited (30s) instead of
+  once-per-episode, so every fire-time capture records its price source.
+
 ### Notes
 - `session_range`/`retrieve_bars` are not yet supported on the Tradovate
   backend (dashboard shows “—”; the Morning Plan is Databento-backed and

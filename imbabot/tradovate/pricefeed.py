@@ -56,7 +56,7 @@ class ReferencePriceFeed:
         self._px_backoff_until = 0.0
         self._public_warned = False
         self._px_live: Optional[bool] = None     # data tier: live preferred, sim fallback
-        self._divergence_warned = False
+        self._last_div_log = 0.0                 # divergence lines: max one per 30s
 
     # ------------------------------------------------------------ sources
     def _ensure_px(self) -> Any:
@@ -131,8 +131,11 @@ class ReferencePriceFeed:
                     public = self._quote_fn()
                     if public is not None and \
                             abs(price - float(public)) > _DIVERGENCE_MAX_POINTS:
-                        if not self._divergence_warned:
-                            self._divergence_warned = True
+                        # Rate-limited to 30s, NOT once-per-episode: the fire-
+                        # time capture must always log its own decision (the
+                        # 7/21 fire's silent source pick cost diagnosis time).
+                        if now - self._last_div_log >= 30.0:
+                            self._last_div_log = now
                             self._log(
                                 f"TopStep bars are {abs(price - float(public)):.1f}pt "
                                 f"away from the live public quote ({price:,.2f} vs "
@@ -141,7 +144,6 @@ class ReferencePriceFeed:
                         self.last_source = "public"
                         self._cache = (now, float(public))
                         return float(public)
-                    self._divergence_warned = False
                     self.last_source = "topstep"
                     self._cache = (now, price)
                     self._public_warned = False
