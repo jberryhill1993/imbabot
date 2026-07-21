@@ -27,6 +27,11 @@ _CACHE_SECONDS = 2.0
 # After a TopStep HTTP 429 (rate limit), serve the public quote for this long
 # instead of hammering ProjectX.
 _PX_BACKOFF_SECONDS = 60.0
+# If the TopStep bar price and the live public quote disagree by more than this
+# many points, trust the QUOTE. Live 2026-07-20: a stale pre-open sim bar was
+# 11+ pts below Tradovate's real book — the straddle centered low and the BUY
+# stop filled instantly, a second before the open.
+_DIVERGENCE_MAX_POINTS = 5.0
 
 
 class ReferencePriceFeed:
@@ -50,6 +55,8 @@ class ReferencePriceFeed:
         self._cache: Optional[tuple] = None      # (ts, price)
         self._px_backoff_until = 0.0
         self._public_warned = False
+        self._px_live: Optional[bool] = None     # data tier: live preferred, sim fallback
+        self._divergence_warned = False
 
     # ------------------------------------------------------------ sources
     def _ensure_px(self) -> Any:
@@ -83,6 +90,24 @@ class ReferencePriceFeed:
                       f"public NQ quote instead.", "warning")
             return None
 
+    def _px_price(self, px: Any) -> float:
+        """Bars from the LIVE data tier when available (real-time CME), the sim
+        tier otherwise. The tier is probed once and remembered."""
+        if self._px_live is None:
+            try:
+                price = px.last_price(self._px_contract.id, live=True)
+                self._px_live = True
+                self._log("TopStep bars: LIVE data tier.")
+                return price
+            except Exception as exc:
+                if "429" in str(exc):
+                    raise               # rate limit says nothing about the tier
+                self._px_live = False
+                self._log("TopStep bars: live tier unavailable — using the sim "
+                          "tier (cross-checked against the public quote).",
+                          "warning")
+        return px.last_price(self._px_contract.id, live=self._px_live)
+
     @staticmethod
     def _default_quote() -> Optional[float]:
         from ..ticker import fetch_quote
@@ -100,8 +125,23 @@ class ReferencePriceFeed:
             px = self._ensure_px()
             if px is not None:
                 try:
-                    price = float(px.last_price(self._px_contract.id,
-                                                live=s.use_live_data))
+                    price = float(self._px_price(px))
+                    # Cross-venue sanity: the straddle executes on Tradovate's
+                    # REAL book, so a stale TopStep bar must never center it.
+                    public = self._quote_fn()
+                    if public is not None and \
+                            abs(price - float(public)) > _DIVERGENCE_MAX_POINTS:
+                        if not self._divergence_warned:
+                            self._divergence_warned = True
+                            self._log(
+                                f"TopStep bars are {abs(price - float(public)):.1f}pt "
+                                f"away from the live public quote ({price:,.2f} vs "
+                                f"{float(public):,.2f}) — using the QUOTE for the "
+                                f"reference.", "warning")
+                        self.last_source = "public"
+                        self._cache = (now, float(public))
+                        return float(public)
+                    self._divergence_warned = False
                     self.last_source = "topstep"
                     self._cache = (now, price)
                     self._public_warned = False

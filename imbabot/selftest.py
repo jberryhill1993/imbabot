@@ -1112,8 +1112,8 @@ def run_selftest() -> int:
 
     s_pf = Settings(backend="tradovate", tdv_price_source="topstep",
                     username="u", contract_symbol="MNQ")
-    feed = ReferencePriceFeed(s_pf, px_client=_PxStub(), quote_fn=lambda: 99999.0)
-    _check("tdv feed: TopStep source preferred",
+    feed = ReferencePriceFeed(s_pf, px_client=_PxStub(), quote_fn=lambda: 21043.0)
+    _check("tdv feed: TopStep source preferred when it agrees with the quote",
            feed.last_price() == 21042.5 and feed.last_source == "topstep")
     feed2 = ReferencePriceFeed(s_pf, px_client=_PxDead(), quote_fn=lambda: 21050.0)
     _check("tdv feed: falls back to the public quote",
@@ -1170,6 +1170,43 @@ def run_selftest() -> int:
     feed6.last_price()
     _check("tdv feed: short cache serves back-to-back capture probes",
            qcalls["n"] == 1, f"quote calls={qcalls['n']}")
+
+    # Mon 7/20 rehearsal regressions: live-tier preference + divergence guard
+    # (a stale sim bar 11pt under Tradovate's book filled the BUY pre-open).
+    tiers = []
+    class _PxTier:
+        authenticated = True
+        def resolve_contract(self, symbol, live=False):
+            return type("C", (), {"id": "PX1", "name": "NQU6"})()
+        def last_price(self, cid, live=False):
+            tiers.append(live)
+            return 21042.5
+    feed7 = ReferencePriceFeed(s_pf, px_client=_PxTier(), quote_fn=lambda: 21042.0)
+    feed7.last_price()
+    _check("tdv feed: LIVE data tier probed first", tiers == [True], f"got {tiers}")
+
+    tiers2 = []
+    class _PxLiveDead:
+        authenticated = True
+        def resolve_contract(self, symbol, live=False):
+            return type("C", (), {"id": "PX1", "name": "NQU6"})()
+        def last_price(self, cid, live=False):
+            tiers2.append(live)
+            if live:
+                raise RuntimeError("live data subscription required")
+            return 21042.5
+    feed8 = ReferencePriceFeed(s_pf, px_client=_PxLiveDead(), quote_fn=lambda: 21042.0)
+    _check("tdv feed: live tier dead -> sim fallback still serves",
+           feed8.last_price() == 21042.5 and tiers2 == [True, False], f"got {tiers2}")
+
+    dwarns = []
+    feed9 = ReferencePriceFeed(s_pf, log=lambda m, level="info": dwarns.append(m),
+                               px_client=_PxTier(), quote_fn=lambda: 21055.0)
+    p9 = feed9.last_price()
+    _check("tdv feed: >5pt divergence -> the live quote wins",
+           p9 == 21055.0 and feed9.last_source == "public", f"got {p9}")
+    _check("tdv feed: divergence warned",
+           any("away from the live public quote" in m for m in dwarns))
 
     # client dispatch: topstep source serves the price with the MD socket OFF
     warns_pf = []
@@ -1244,6 +1281,57 @@ def run_selftest() -> int:
     _check("tdv E2E: short fill cancels the long entry",
            long_oid in ft.cancelled and short_oid not in ft.cancelled,
            f"cancelled={ft.cancelled}")
+
+    # Mon 7/20 rehearsal regression — CACHE LAG: the fill hit the FIRST 0.5s
+    # scan before the venue's push cache listed the fresh entries. The old
+    # visibility guard skipped the cancel and killed the monitor; now the
+    # signed net names the filled side and the sibling is cancelled blind.
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
+    ft.positions = [{"contractId": eng.contract.id, "netPos": 1, "netPrice": 21012.0}]
+    _orig_soo = ft.search_open_orders
+    ft.search_open_orders = lambda acct: []      # push cache hasn't caught up
+    acted = eng._oco_scan(plan, eng.account.id, eng.contract.id, set())
+    ft.search_open_orders = _orig_soo
+    _check("tdv OCO cache-lag: long fill cancels the INVISIBLE short entry",
+           acted is True and short_oid in ft.cancelled and long_oid not in ft.cancelled,
+           f"acted={acted} cancelled={ft.cancelled}")
+
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    long_oid, short_oid = plan.long_leg.order_id, plan.short_leg.order_id
+    ft.positions = [{"contractId": eng.contract.id, "netPos": -1, "netPrice": 20988.0}]
+    _orig_soo = ft.search_open_orders
+    ft.search_open_orders = lambda acct: []
+    acted = eng._oco_scan(plan, eng.account.id, eng.contract.id, set())
+    ft.search_open_orders = _orig_soo
+    _check("tdv OCO cache-lag: short fill cancels the INVISIBLE long entry",
+           acted is True and long_oid in ft.cancelled and short_oid not in ft.cancelled,
+           f"acted={acted} cancelled={ft.cancelled}")
+
+    # cancel error -> monitor retries next poll instead of dying
+    eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade")
+    plan = build_straddle(eng.contract, 21000.0, eng.strategy_params(), tag_prefix="t")
+    eng._place_plan(plan)
+    short_oid = plan.short_leg.order_id
+    ft.positions = [{"contractId": eng.contract.id, "netPos": 1, "netPrice": 21012.0}]
+    _orig_cancel = ft.cancel_order
+    _flaky = {"n": 0}
+    def _flaky_cancel(acct, oid):
+        _flaky["n"] += 1
+        if _flaky["n"] == 1:
+            raise RuntimeError("venue hiccup")
+        return _orig_cancel(acct, oid)
+    ft.cancel_order = _flaky_cancel
+    r1 = eng._oco_scan(plan, eng.account.id, eng.contract.id, set())
+    r2 = eng._oco_scan(plan, eng.account.id, eng.contract.id, set())
+    ft.cancel_order = _orig_cancel
+    _check("tdv OCO cancel error: first scan retries, second succeeds",
+           r1 is False and r2 is True and short_oid in ft.cancelled,
+           f"r1={r1} r2={r2} cancelled={ft.cancelled}")
 
     # full-size parity: the user's real 4-contract straddle places unchanged
     eng, ft = make_tdv_engine(dry_run=False, trade_mode="one_trade", contracts=4)

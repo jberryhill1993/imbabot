@@ -426,17 +426,34 @@ class BotEngine:
         if not gone and net == 0:
             return False                            # both entries still resting
 
+        # Which legs actually FILLED? The signed net names the side even when the
+        # order book hasn't shown us the entries yet.
+        filled = set(gone)
+        if net > 0 and plan.long_leg.order_id is not None:
+            filled.add(plan.long_leg.order_id)
+        elif net < 0 and plan.short_leg.order_id is not None:
+            filled.add(plan.short_leg.order_id)
+
         self.log(f"Fill detected (entry filled; net={net}). Cancelling the other entry.")
+        # Cancel every NON-filled leg regardless of open-book visibility.
+        # (Live 2026-07-20, Tradovate demo: the fill hit on the FIRST 0.5s scan,
+        # before the venue's push cache listed the fresh SELL entry — the old
+        # `oid not in open_ids: continue` guard skipped it, cancelled nothing,
+        # and the monitor exited. Cancelling an already-gone order is harmless;
+        # a cancel that ERRORS keeps the monitor alive to retry next poll.)
+        all_ok = True
         for leg in plan.legs:
             oid = leg.order_id
-            if oid is None or oid not in open_ids:
-                continue                            # this leg filled or is already gone
+            if oid is None or oid in filled:
+                continue                            # this leg is the filled one
             try:
                 self.client.cancel_order(acct, oid)
                 self.log(f"Cancelled remaining {leg.side.name} entry orderId={oid}.")
             except Exception as exc:
-                self.log(f"Failed to cancel {leg.side.name} entry {oid}: {exc}", "error")
-        return True
+                all_ok = False
+                self.log(f"Failed to cancel {leg.side.name} entry {oid}: {exc} — "
+                         f"retrying next poll.", "error")
+        return all_ok
 
     def _monitor_oco(self, plan: StraddlePlan, poll_seconds: float = 0.5) -> None:
         """One-Trade OCO: the instant one entry fills, cancel the other so only one
@@ -450,7 +467,6 @@ class BotEngine:
             if self._oco_scan(plan, acct, cid, seen_open):
                 return
             self._monitor_stop.wait(poll_seconds)
-        self.log("OCO monitor stopped.")
         self.log("OCO monitor stopped.")
 
     # ------------------------------------------------------- emergency stop

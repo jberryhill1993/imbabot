@@ -68,6 +68,21 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
   Needed because Tradovate UI bracket presets do not apply to API orders —
   the bot's OSO brackets are the only brackets there.
 
+### Fixed — Mon 2026-07-20 demo-open rehearsal findings (live-caught)
+- **OCO monitor could die with the sibling entry still working.** When a fill
+  hit the very first 0.5s scan (before Tradovate's push cache listed the fresh
+  entries), the cancel loop's open-book visibility guard skipped every leg,
+  cancelled nothing, and the monitor exited. Now the signed net position names
+  the filled side and the sibling is cancelled regardless of visibility; a
+  cancel error keeps the monitor alive to retry each poll. (Latent on TopStep
+  too — REST polling had always listed the entries by the first scan.)
+- **Reference price could come from a stale sim bar.** The 7/20 fire centered
+  the straddle on a TopStep sim-tier bar 11+ pts below Tradovate's real book —
+  the BUY stop was instantly marketable a second before the open. The price
+  feed now probes the LIVE data tier first (sim fallback) and cross-checks the
+  result against the live public NQ quote: >5 pt divergence → the quote wins,
+  loudly logged.
+
 ### Notes
 - `session_range`/`retrieve_bars` are not yet supported on the Tradovate
   backend (dashboard shows “—”; the Morning Plan is Databento-backed and

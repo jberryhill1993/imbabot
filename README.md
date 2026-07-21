@@ -259,6 +259,11 @@ orders — so keep the bot SL/TP toggles ON for Tradovate; a naked entry there i
 truly naked (the bot warns loudly). Also set Tradovate's own account risk
 settings as the platform-side backstop.
 
+**Reference-price sanity.** The straddle executes on Tradovate's real book, so
+the TopStep-sourced reference is cross-checked against the live public NQ quote
+at capture time; if they diverge by more than 5 points (stale pre-open bar),
+the quote is used instead and the log says so.
+
 **Entering SL/TP in dollars.** To mirror the TopStep Position-Brackets workflow,
 switch "SL/TP entered as" to **$ per position** and type dollar amounts (e.g.
 SL $600 / TP $550): the bot converts to per-contract points using your contract
