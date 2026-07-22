@@ -236,21 +236,35 @@ def apply_app_update(zip_path: Path, *, log: Optional[Callable[..., None]] = Non
             raise FileNotFoundError(f"{exe_name} not found inside the update zip")
         new_exe = candidates[0]
         # The .bat lives OUTSIDE staging so cleaning staging can't kill the
-        # script that's doing the cleaning.
+        # script that's doing the cleaning. It RETRIES the copy until the app
+        # has exited and Windows releases the exe lock (live-found 2026-07-22:
+        # a single 2s wait + one copy attempt failed against the still-running
+        # exe, so the update never applied). The CALLER must exit the app
+        # shortly after this returns True.
         bat = Path(tempfile.gettempdir()) / f"imbabot_apply_{os.getpid()}.bat"
         bat.write_text(
             "@echo off\r\n"
-            "timeout /t 2 /nobreak >nul\r\n"
-            f'copy /Y "{new_exe}" "{current_exe}" >nul\r\n'
+            "set tries=0\r\n"
+            ":wait\r\n"
+            "timeout /t 1 /nobreak >nul\r\n"
+            f'copy /Y "{new_exe}" "{current_exe}" >nul 2>&1\r\n'
+            "if errorlevel 1 (\r\n"
+            "  set /a tries+=1\r\n"
+            "  if %tries% lss 30 goto wait\r\n"
+            "  exit /b 1\r\n"
+            ")\r\n"
             f'start "" "{current_exe}"\r\n'
             f'rmdir /S /Q "{staging}"\r\n'
             f'del "%~f0"\r\n',
             encoding="utf-8")
         import subprocess
-        DETACHED = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(["cmd", "/c", str(bat)], creationflags=DETACHED, close_fds=True)
+        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW:
+        # survives our exit, and no console window flashes at the user.
+        FLAGS = 0x00000008 | 0x00000200 | 0x08000000
+        subprocess.Popen(["cmd", "/c", str(bat)], creationflags=FLAGS, close_fds=True)
         if log:
-            log("Updater launched — the app will restart on the new version.")
+            log("Updater launched — closing to apply; the app will reopen "
+                "on the new version.")
         return True
     except Exception as exc:
         if log:
