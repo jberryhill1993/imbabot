@@ -130,6 +130,27 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
 - Account roles: TopStep PRAC = testing venue; Tradovate = eventual live
   (locked until the demo check passes and `safety.py` is deliberately edited).
 
+## [0.2.4.4] - 2026-07-22 (news calendar: real dates + auto-refresh; model refit — mirrored from `main`)
+
+The 0.2.4 series (auto-updater, bundled model, this news-calendar work) shipped
+from `main`; entries 0.2.4–0.2.4.3 live in main's CHANGELOG. Mirrored here so
+the dev superset carries the same code.
+
+### Added
+- **Backfilled official release dates (2025-06 → 2026-12)** for CPI + PPI (BLS),
+  GDP + Core PCE (BEA), Retail Sales (Census), ISM Manufacturing/Services, from
+  the agencies' published schedules (incl. the real late-2025 shutdown gaps).
+- **ForexFactory auto-feed (`analysis/newsfeed.py`).** At launch the app pulls
+  FF's free weekly calendar XML (this week + next), keeps only the release
+  types the model knows (so `news_score` stays consistent with training), and
+  caches to `analysis/news_feed.json`. `calendar.event_flag` merges cache +
+  curated JSON + derived rules; curated wins ties; offline mornings use the
+  last cache. Future news dates now maintain themselves.
+- **Model refit** on the same 264 tick days with the news features now actually
+  populated; refreshed bundle ships in `analysis-data.zip` + the built-in model.
+
+### No trading-logic changes — engine/strategy/projectx untouched.
+
 ## [0.2.3] - 2026-07-15 (released to `main`, tagged `v0.2.3`)
 
 First stable release since 0.2.0.1. Promotes the tick-data Morning Plan line and the new

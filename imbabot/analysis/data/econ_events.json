@@ -1,5 +1,5 @@
 {
-  "_comment": "US macro events with impact levels for the Morning Plan. NFP (first Friday 08:30, HIGH) and jobless claims (Thursday 08:30, LOW) are DERIVED in calendar.py. FOMC dates below are exact. CPI / Core PCE / PPI / Retail / GDP / ISM date lists are user-fillable from forexfactory.com or BLS/BEA/FRB schedules (paste ISO YYYY-MM-DD into 'dates'); impact defaults live in calendar.py _CURATED. Times are ET.",
+  "_comment": "US macro events with impact levels for the Morning Plan. NFP (first Friday 08:30, HIGH) and jobless claims (Thursday 08:30, LOW) are DERIVED in calendar.py; upcoming weeks also auto-refresh from the ForexFactory feed (newsfeed.py). Dates below are from OFFICIAL schedules (FRB / BLS / BEA / Census / ISM), backfilled 2025-06 .. 2026-12 on 2026-07-22. Late-2025 gaps are REAL: the Oct-Nov 2025 government shutdown canceled/delayed several releases. Impact defaults live in calendar.py _CURATED. Times are ET.",
   "fomc": {
     "time_et": "14:00",
     "impact": "high",
@@ -9,11 +9,74 @@
       "2026-09-16", "2026-10-28", "2026-12-09"
     ]
   },
-  "cpi":    { "time_et": "08:30", "impact": "high",   "dates": [] },
-  "pce":    { "time_et": "08:30", "impact": "high",   "dates": [] },
-  "ppi":    { "time_et": "08:30", "impact": "medium", "dates": [] },
-  "retail": { "time_et": "08:30", "impact": "medium", "dates": [] },
-  "gdp":    { "time_et": "08:30", "impact": "medium", "dates": [] },
-  "ism_mfg": { "time_et": "10:00", "impact": "medium", "dates": [] },
-  "ism_svc": { "time_et": "10:00", "impact": "medium", "dates": [] }
+  "cpi": {
+    "time_et": "08:30",
+    "impact": "high",
+    "dates": [
+      "2025-06-11", "2025-07-15", "2025-08-12", "2025-09-11", "2025-10-24",
+      "2025-12-18", "2026-01-13", "2026-02-13", "2026-03-11", "2026-04-10",
+      "2026-05-12", "2026-06-10", "2026-07-14", "2026-08-12", "2026-09-11",
+      "2026-10-14", "2026-11-10", "2026-12-10"
+    ]
+  },
+  "pce": {
+    "time_et": "08:30",
+    "impact": "high",
+    "dates": [
+      "2025-06-27", "2025-07-31", "2025-08-29", "2025-09-26", "2025-12-05",
+      "2026-01-22", "2026-02-20", "2026-03-13", "2026-04-09", "2026-04-30",
+      "2026-05-28", "2026-06-25", "2026-07-30", "2026-08-26", "2026-09-30",
+      "2026-10-29", "2026-11-25", "2026-12-23"
+    ]
+  },
+  "ppi": {
+    "time_et": "08:30",
+    "impact": "medium",
+    "dates": [
+      "2025-06-12", "2025-07-16", "2025-08-14", "2025-09-10", "2025-11-25",
+      "2026-01-14", "2026-01-30", "2026-02-27", "2026-03-18", "2026-04-14",
+      "2026-05-13", "2026-06-11", "2026-07-15", "2026-08-13", "2026-09-10",
+      "2026-10-15", "2026-11-13", "2026-12-15"
+    ]
+  },
+  "retail": {
+    "time_et": "08:30",
+    "impact": "medium",
+    "dates": [
+      "2025-06-17", "2025-07-17", "2025-08-15", "2025-09-16", "2025-11-25",
+      "2025-12-16", "2026-01-14", "2026-02-10", "2026-03-06", "2026-04-01",
+      "2026-04-21", "2026-05-14", "2026-06-17", "2026-07-16", "2026-08-14",
+      "2026-09-16", "2026-10-15", "2026-11-17", "2026-12-16"
+    ]
+  },
+  "gdp": {
+    "time_et": "08:30",
+    "impact": "medium",
+    "dates": [
+      "2025-06-26", "2025-07-30", "2025-08-28", "2025-09-25", "2025-12-23",
+      "2026-01-22", "2026-02-20", "2026-03-13", "2026-04-09", "2026-04-30",
+      "2026-05-28", "2026-06-25", "2026-07-30", "2026-08-26", "2026-09-30",
+      "2026-10-29", "2026-11-25", "2026-12-23"
+    ]
+  },
+  "ism_mfg": {
+    "time_et": "10:00",
+    "impact": "medium",
+    "dates": [
+      "2025-06-02", "2025-07-01", "2025-08-01", "2025-09-02", "2025-10-01",
+      "2025-11-03", "2025-12-01", "2026-01-05", "2026-02-02", "2026-03-02",
+      "2026-04-01", "2026-05-01", "2026-06-01", "2026-07-01", "2026-08-03",
+      "2026-09-01", "2026-10-01", "2026-11-02", "2026-12-01"
+    ]
+  },
+  "ism_svc": {
+    "time_et": "10:00",
+    "impact": "medium",
+    "dates": [
+      "2025-06-04", "2025-07-03", "2025-08-05", "2025-09-04", "2025-10-03",
+      "2025-11-05", "2025-12-03", "2026-01-07", "2026-02-04", "2026-03-04",
+      "2026-04-06", "2026-05-05", "2026-06-03", "2026-07-06", "2026-08-05",
+      "2026-09-03", "2026-10-05", "2026-11-04", "2026-12-03"
+    ]
+  }
 }
