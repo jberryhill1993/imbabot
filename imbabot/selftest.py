@@ -513,6 +513,56 @@ def run_selftest() -> int:
            any("Jobless" in n and imp == "low" for n, imp, *_ in econ.event_flag("2026-06-25").events))
     _check("calendar: FOMC flag", econ.event_flag("2025-07-30").fomc)
 
+    # 11h2) curated econ_events.json is actually filled (backfilled 2025-06 .. 2026-12)
+    import re as _re
+    _blocks = {k: (econ._load().get(k) or {}).get("dates") or []
+               for k in ("fomc", "cpi", "pce", "ppi", "retail", "gdp", "ism_mfg", "ism_svc")}
+    _check("econ_events: every curated list non-empty",
+           all(_blocks.values()), {k: len(v) for k, v in _blocks.items()})
+    _check("econ_events: all dates ISO-valid",
+           all(_re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) for v in _blocks.values() for d in v))
+
+    # 11h3) ForexFactory weekly-feed parse + cache + event_flag merge
+    from .analysis import newsfeed
+    _FF_XML = (b"<weeklyevents>"
+               b"<event><title>Core CPI m/m</title><country>USD</country>"
+               b"<date>07-14-2026</date><time>8:30am</time><impact>High</impact></event>"
+               b"<event><title>CPI y/y</title><country>USD</country>"
+               b"<date>07-14-2026</date><time>8:30am</time><impact>High</impact></event>"
+               b"<event><title>French Flash Manufacturing PMI</title><country>EUR</country>"
+               b"<date>07-14-2026</date><time>3:15am</time><impact>Low</impact></event>"
+               b"<event><title>Crude Oil Inventories</title><country>USD</country>"
+               b"<date>07-15-2026</date><time>10:30am</time><impact>Low</impact></event>"
+               b"<event><title>FOMC Statement</title><country>USD</country>"
+               b"<date>07-29-2026</date><time>2:00pm</time><impact>High</impact></event>"
+               b"<event><title>Federal Funds Rate</title><country>USD</country>"
+               b"<date>07-29-2026</date><time>2:00pm</time><impact>High</impact></event>"
+               b"</weeklyevents>")
+    _parsed = newsfeed.parse_feed(_FF_XML)
+    _check("newsfeed: CPI rows collapse to one, time normalized",
+           _parsed.get("2026-07-14") == [("cpi", "08:30")], _parsed.get("2026-07-14"))
+    _check("newsfeed: non-USD + untracked titles filtered", "2026-07-15" not in _parsed)
+    _check("newsfeed: FOMC rows collapse, pm -> 24h",
+           _parsed.get("2026-07-29") == [("fomc", "14:00")], _parsed.get("2026-07-29"))
+    def _feed_ok(url, timeout):
+        if "thisweek" in url:
+            return _FF_XML
+        raise OSError("no next week")           # one URL failing must not lose the other
+    _check("newsfeed: fetch caches despite one URL down", newsfeed.fetch(get_bytes=_feed_ok))
+    _check("newsfeed: cached_events round-trip",
+           newsfeed.cached_events("2026-07-14") == [("cpi", "08:30")])
+    _cpi_day = econ.event_flag("2026-07-14")
+    _check("newsfeed: merged into event_flag as pre-open CPI, no dupes",
+           sum(1 for n, imp, _t, pre in _cpi_day.events if n == "CPI" and imp == "high" and pre) == 1,
+           _cpi_day.events)
+
+    def _feed_down(url, timeout):
+        raise OSError("offline")
+    _check("newsfeed: fully offline fetch -> False, no raise",
+           newsfeed.fetch(get_bytes=_feed_down, max_age_hours=0) is False)
+    _check("newsfeed: fresh cache short-circuits (would return True if it fetched)",
+           newsfeed.fetch(get_bytes=_feed_ok) is False)
+
     # 11i) spike model fit + predict round-trip (synthetic: high VIX -> bigger spike)
     from .analysis.spike_model import SpikeModel
     from .analysis.tick_dataset import DayRow

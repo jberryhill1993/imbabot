@@ -6,6 +6,27 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.4.4] - 2026-07-22 (news calendar: real dates + auto-refresh; model refit)
+
+The Morning Plan's news signal was half-blind: only FOMC dates and the derived
+NFP/Thursday-claims rules were populated — CPI/PCE/PPI/Retail/GDP/ISM lists in
+`econ_events.json` were empty, so e.g. a CPI morning looked like a no-news day.
+
+### Added
+- **Backfilled official release dates (2025-06 → 2026-12)** for CPI + PPI (BLS),
+  GDP + Core PCE (BEA), Retail Sales (Census), ISM Manufacturing/Services, from
+  the agencies' published schedules (incl. the real late-2025 shutdown gaps).
+- **ForexFactory auto-feed (`analysis/newsfeed.py`).** At launch the app pulls
+  FF's free weekly calendar XML (this week + next), keeps only the release
+  types the model knows (so `news_score` stays consistent with training), and
+  caches to `analysis/news_feed.json`. `calendar.event_flag` merges cache +
+  curated JSON + derived rules; curated wins ties; offline mornings use the
+  last cache. Future news dates now maintain themselves.
+- **Model refit** on the same 264 tick days with the news features now actually
+  populated; refreshed bundle ships in `analysis-data.zip` + the built-in model.
+
+### No trading-logic changes — engine/strategy/projectx untouched.
+
 ## [0.2.4.3] - 2026-07-22 (update-loop live-fire test #2; no functional changes)
 
 ## [0.2.4.2] - 2026-07-22 (fix: update actually applies — app exits so the exe swap can happen; retry loop; no console flash)

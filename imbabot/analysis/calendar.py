@@ -9,7 +9,8 @@ with an impact level (high/medium/low):
   hit the 08:30 open but raise the day's volatility regime.
 
 ``event_flag(date)`` returns named events + impact + numeric scores the predictor keys off.
-Curated dates come from BLS/BEA/FRB schedules (or forexfactory.com); the derived rules always work.
+Curated dates come from BLS/BEA/FRB schedules; the derived rules always work; and upcoming
+dates auto-refresh from ForexFactory's weekly feed cache (see ``newsfeed.py`` — curated wins ties).
 """
 from __future__ import annotations
 
@@ -116,11 +117,26 @@ def event_flag(d: str) -> EventFlag:
         flag.events.append(("Jobless Claims", "low", "08:30", True))
 
     # --- curated irregular releases (dates in JSON) ---
+    seen_keys = set()
     for key, (name, impact, time_et, preopen) in _CURATED.items():
         block = data.get(key) or {}
         if d in (block.get("dates") or []):
             imp = block.get("impact", impact)
             flag.events.append((name, imp, block.get("time_et", time_et), preopen))
+            seen_keys.add(key)
+
+    # --- auto-fetched feed (ForexFactory weekly XML cache; curated JSON wins ties) ---
+    try:
+        from . import newsfeed
+        for key, feed_time in newsfeed.cached_events(d):
+            if key in seen_keys or key not in _CURATED:
+                continue
+            name, impact, def_time, _ = _CURATED[key]
+            t = feed_time or def_time
+            flag.events.append((name, impact, t, t < "09:30"))
+            seen_keys.add(key)
+    except Exception:
+        pass  # a bad cache must never break the plan
 
     return flag
 

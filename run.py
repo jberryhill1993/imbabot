@@ -46,13 +46,19 @@ def main() -> int:
     except Exception:
         pass
 
-    # Silently pull the latest published model/data in the background (never
-    # blocks launch; verified by checksum; data only).
+    # Silently pull the latest published model/data and this/next week's news
+    # dates in the background (never blocks launch; sync is checksum-verified).
     try:
         import threading
         from imbabot.updater import sync_model
-        threading.Thread(target=lambda: sync_model(log=lambda m, *a: print(m)),
-                         name="DataAutoUpdate", daemon=True).start()
+        from imbabot.analysis.newsfeed import fetch as fetch_news
+
+        def _background_sync() -> None:
+            sync_model(log=lambda m, *a: print(m))
+            fetch_news(log=lambda m, *a: print(m))
+
+        threading.Thread(target=_background_sync, name="DataAutoUpdate",
+                         daemon=True).start()
     except Exception:
         pass
 
