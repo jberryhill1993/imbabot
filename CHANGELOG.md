@@ -6,6 +6,8 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.4.1] - 2026-07-22 (update-loop live-fire test; no functional changes)
+
 ## [0.2.4] - 2026-07-22 (released to `main`, tagged `v0.2.4`)
 
 Auto-updating bot. **No trading-logic changes** — engine/strategy/projectx are
