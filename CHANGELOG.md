@@ -6,6 +6,15 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.4.5] - 2026-07-22 (weekly data: tick cache through 7/21, 271-day refit)
+
+Data-only release (no code changes): ingested the 2026-07-13..21 Databento week
+(7 days: 3 clean winners incl. the 7/14 CPI day, 4 whipsaws incl. the live 7/21
+loss), refreshed the VIX/NQ daily caches (were stale at 7/16), and refit.
+Walk-forward (211 OOS days): corr +0.55; live TRADE rule +$108.4/day/ct, 59% win.
+7/21 autopsy closed: overnight gap was 433pt (gap-up) — the >40pt whipsaw filter
+correctly did NOT downgrade it; the loss is the known ~40% TRADE-day loss mode.
+
 ## [0.2.4.4] - 2026-07-22 (news calendar: real dates + auto-refresh; model refit)
 
 The Morning Plan's news signal was half-blind: only FOMC dates and the derived

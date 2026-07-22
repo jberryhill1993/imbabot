@@ -671,7 +671,8 @@ def run_selftest() -> int:
            all((bdir / n).is_file() for n in
                ("spike_model.json", "VIX_daily.json", "NQF_daily.json")), f"dir={bdir}")
     bm = _json13.loads((bdir / "spike_model.json").read_text(encoding="utf-8"))
-    _check("bundled model is calibrated", bm.get("calibrated") is True and bm.get("n_days") == 264)
+    # n_days grows with each weekly refit — floor, not equality
+    _check("bundled model is calibrated", bm.get("calibrated") is True and bm.get("n_days", 0) >= 264)
 
     binst = tempfile.mkdtemp(prefix="imbabot-bootstrap-")
     os.environ["IMBABOT_CONFIG_DIR"] = binst

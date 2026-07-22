@@ -10,5 +10,5 @@ any orders this software places. See README.md for the rules that apply to
 automated trading on Topstep.
 """
 
-__version__ = "0.2.4.4"
+__version__ = "0.2.4.5"
 __all__ = ["__version__"]
