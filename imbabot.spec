@@ -45,8 +45,9 @@ hiddenimports += ["imbabot.gui", "imbabot.engine", "imbabot.projectx", "imbabot.
 # them so the (calibrated) packs ship inside the .exe/.app for downloaders.
 datas += [("imbabot/browser/selectors", "imbabot/browser/selectors")]
 
-# Analyzer data (economic-event calendar) — bundled so calendar.py resolves it under
-# sys._MEIPASS in the frozen app (0.2.1+ Morning Plan).
+# Analyzer data — econ-event calendar AND the calibrated Morning-Plan model bundle
+# (data/model/: spike_model.json + VIX/NQF dailies). Shipping the model means a fresh
+# install self-heals via bootstrap.install_bundled_analysis and is never UNCALIBRATED.
 datas += [("imbabot/analysis/data", "imbabot/analysis/data")]
 
 # Glass web UI (0.2.3): static assets + pywebview (WebView2 renderer on Windows).

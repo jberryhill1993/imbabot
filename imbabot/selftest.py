@@ -1523,5 +1523,80 @@ def run_selftest() -> int:
     finally:
         os.environ["IMBABOT_CONFIG_DIR"] = tmp   # restore selftest's throwaway dir
 
+    # 16) bundled-model self-install + auto-updater
+    from .updater import (UpdateInfo, _parse_checksums, _verify, check_for_update,
+                          is_newer, parse_version, sync_model)
+    from .analysis.bootstrap import install_bundled_analysis, bundled_model_dir
+
+    _check("version parse tolerates v/-dev",
+           parse_version("v0.2.6") == (0, 2, 6) and parse_version("0.2.6-dev") == (0, 2, 6))
+    _check("is_newer: 0.2.6 > 0.2.5", is_newer("v0.2.6", "0.2.5")
+           and not is_newer("0.2.5", "0.2.5") and not is_newer("0.2.4", "0.2.5-dev"))
+
+    # bundled repo files exist + calibrated
+    bdir = bundled_model_dir()
+    _check("bundled model dir has all 3 files",
+           all((bdir / n).is_file() for n in
+               ("spike_model.json", "VIX_daily.json", "NQF_daily.json")),
+           f"dir={bdir}")
+    bm = _json.loads((bdir / "spike_model.json").read_text(encoding="utf-8"))
+    _check("bundled model is calibrated", bm.get("calibrated") is True and bm.get("n_days") == 264)
+
+    # self-install into an EMPTY config dir -> calibrated
+    binst = tempfile.mkdtemp(prefix="imbabot-bootstrap-")
+    os.environ["IMBABOT_CONFIG_DIR"] = binst
+    try:
+        got = install_bundled_analysis()
+        _check("bootstrap installs the model into a fresh dir", "spike_model.json" in got)
+        from .analysis.spike_model import load_spike_model
+        _check("installed model loads calibrated", load_spike_model().calibrated is True)
+        got2 = install_bundled_analysis()
+        _check("bootstrap idempotent (2nd call installs nothing)", got2 == [])
+        # morning_plan calibrated with NO ticks in this fresh dir (recent_thrust defaults)
+        mp_fresh = morning_plan("2026-07-16", target_dollars=550.0)
+        _check("morning_plan calibrated w/ empty ticks dir",
+               mp_fresh.calibrated is True and mp_fresh.predicted_spike != round(0.75 * 18.6, 1),
+               f"cal={mp_fresh.calibrated} spike={mp_fresh.predicted_spike}")
+    finally:
+        os.environ["IMBABOT_CONFIG_DIR"] = tmp
+
+    # checksum parse + verify
+    import hashlib as _hlib
+    cks = _parse_checksums("a"*64 + "  Imbabot-0.2.6.zip\n" + "b"*64 + "  analysis-data.zip\n")
+    _check("checksums parsed", cks["Imbabot-0.2.6.zip"] == "a"*64)
+    info_ck = UpdateInfo(version="0.2.6", notes="", checksums={"x.zip": _hlib.sha256(b"hi").hexdigest()})
+    _verify(b"hi", "x.zip", info_ck)               # matches -> no raise
+    try:
+        _verify(b"bye", "x.zip", info_ck)
+        _check("checksum mismatch refused", False, "no raise")
+    except ValueError:
+        _check("checksum mismatch refused", True)
+    try:
+        _verify(b"hi", "unlisted.zip", info_ck)
+        _check("unlisted asset refused when checksums present", False)
+    except ValueError:
+        _check("unlisted asset refused when checksums present", True)
+
+    # check_for_update via a scripted GitHub JSON (offline)
+    rel = {"tag_name": "v0.2.6", "body": "notes",
+           "assets": [{"name": "Imbabot-0.2.6.zip", "browser_download_url": "https://x/app.zip"},
+                      {"name": "analysis-data.zip", "browser_download_url": "https://x/data.zip"}]}
+    info = check_for_update("0.2.5",
+                            get_json=lambda u, t: rel, get_bytes=lambda u, t: b"")
+    _check("check_for_update parses assets + flags newer",
+           info is not None and info.version == "0.2.6"
+           and info.code_update_available and info.app_url.endswith("app.zip")
+           and info.data_url.endswith("data.zip"))
+    info_same = check_for_update("0.2.6", get_json=lambda u, t: rel, get_bytes=lambda u, t: b"")
+    _check("check_for_update: not newer when equal", not info_same.code_update_available)
+    _check("check_for_update: network failure -> None",
+           check_for_update("0.2.5", get_json=lambda u, t: (_ for _ in ()).throw(RuntimeError("net")))
+           is None)
+
+    # sync_model no-ops (no network) when the info has no data asset
+    _check("sync_model safe no-op when no data asset",
+           sync_model(info=UpdateInfo(version="0.2.6", notes=""),
+                      get_bytes=lambda u, t: b"") is False)
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1

@@ -1495,6 +1495,21 @@ class ImbabotGUI:
     def _show_morning_plan(self, mp) -> None:
         from datetime import date as _date
         self.btn_mp_recalc.configure(state="normal")
+        # Never present the crude fallback (0.75*VIX) as a real call: when the
+        # trained model isn't loaded, say so loudly and show nothing actionable.
+        if not mp.calibrated:
+            self.lbl_mp_action.configure(
+                text="⛔ MODEL NOT LOADED — no advice", foreground=RED_H)
+            self.lbl_mp_inputs.configure(
+                text="Morning-Plan data missing — relaunch the bot (it self-installs the model). "
+                     "If it persists, reinstall from the latest download.", foreground=RED_H)
+            self.mp_cells.grid_remove()
+            self.lbl_mp_sizing.configure(text="")
+            self.lbl_mp_alert.configure(text="")
+            self.lbl_mp_detail.configure(
+                text="The spike predictor could not load its trained model, so it cannot advise "
+                     "today. (This was NOT a real NO-TRADE call.)")
+            return
         tag = "✅ TRADE" if mp.decision == "TRADE" else "⛔ NO-TRADE"
         try:
             sess = _date.fromisoformat(mp.session_date).strftime("%a %b %d")

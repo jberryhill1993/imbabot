@@ -64,7 +64,9 @@ class Api:
         self._mp_busy = False
         self._tick_stop = threading.Event()
         self._poll_stop = threading.Event()
+        self._update = None       # UpdateInfo when a newer build is published
         threading.Thread(target=self._ticker_worker, name="Ticker", daemon=True).start()
+        threading.Thread(target=self._update_check, name="UpdateCheck", daemon=True).start()
 
     # ------------------------------------------------------------------ log
     def _sink(self, line: str, level: str) -> None:
@@ -491,9 +493,15 @@ class Api:
                               max_contracts=self.settings.max_contracts)
             d = asdict(mp)
             self._mp = d
-            self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} "
-                     f"spike ~{mp.predicted_spike:.0f}pt -> "
-                     f"{mp.plan.contracts if (mp.decision == 'TRADE' and mp.plan.feasible) else 0}ct")
+            if not mp.calibrated:
+                from ..analysis.spike_model import _path as _model_path
+                mp_ = _model_path()
+                self.log(f"Morning Plan {mp.session_date}: MODEL NOT LOADED — "
+                         f"model={mp_} exists={mp_.exists()} (showing no advice)", "warn")
+            else:
+                self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} "
+                         f"spike ~{mp.predicted_spike:.0f}pt -> "
+                         f"{mp.plan.contracts if (mp.decision == 'TRADE' and mp.plan.feasible) else 0}ct")
             return {"ok": True, "plan": d}
         except Exception as exc:
             self.log(f"morning plan: {exc}", "error")
@@ -545,12 +553,44 @@ class Api:
             "dry_run": bool(s.dry_run),
             "backend": s.backend,
             "tdv_env": s.tdv_environment if s.backend == "tradovate" else None,
+            "update": ({"version": self._update.version,
+                        "notes": self._update.notes[:400]} if self._update else None),
             "account": s.account_name or "",
             "nq": self._nq, "vix": self._vix,
             "last_price": self._last_price,
             "range": self._range,
             "log": fresh, "seq": self._seq,
         }
+
+    # -------------------------------------------------------------- updates
+    def _update_check(self) -> None:
+        try:
+            from ..updater import check_for_update
+            info = check_for_update()
+            if info and info.code_update_available:
+                self._update = info
+                self.log(f"Update available: v{info.version} — click Update in the header.")
+        except Exception:
+            pass
+
+    def apply_update(self) -> dict:
+        """Download + verify + swap to the newer build (frozen app), then relaunch."""
+        info = self._update
+        if not info:
+            return {"ok": False, "error": "No update available."}
+        try:
+            from ..updater import download_app, apply_app_update
+            self.log(f"Downloading v{info.version}…")
+            path = download_app(info, log=self.log)
+            if not path:
+                return {"ok": False, "error": "This release has no app download."}
+            if apply_app_update(path, log=self.log):
+                return {"ok": True, "restarting": True}
+            return {"ok": False, "error": "Update applies to the packaged app only "
+                    "(this looks like a source run)."}
+        except Exception as exc:
+            self.log(f"Update failed: {exc}", "error")
+            return {"ok": False, "error": str(exc)}
 
     def shutdown(self) -> None:
         """gui.on_close parity: stop threads, disarm, shut the browser session."""
