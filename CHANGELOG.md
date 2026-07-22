@@ -83,6 +83,20 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
   result against the live public NQ quote: >5 pt divergence → the quote wins,
   loudly logged.
 
+### Added — self-updating bot + no more UNCALIBRATED
+- **Bundled model + self-install.** The calibrated 264-day model (+ VIX/NQF
+  dailies) ships inside the app (`imbabot/analysis/data/model/`) and
+  self-installs into the config dir on launch (`analysis/bootstrap.py`). A
+  fresh/other machine is calibrated with no `setup-data.bat` — root-cause fix
+  for the 7/21 machine-#2 "NO-TRADE · UNCALIBRATED" (which was the crude
+  0.75×VIX fallback, not a real call). Both UIs now show a LOUD red "MODEL NOT
+  LOADED — no advice" instead of the fake call when the model can't load.
+- **Auto-update from GitHub Releases** (`imbabot/updater.py`, see `UPDATING.md`):
+  silent data/model sync on launch (weekly retrains propagate zero-touch), and
+  a notify + one-click code update (header ⬆ Update button → verified download →
+  swap the frozen exe → relaunch). HTTPS + SHA-256 verified before any
+  extract/execute. Replaces the manual Drive/OneDrive reupload-redownload loop.
+
 ### Added — live-trade journal (`journal` CLI)
 - Records REAL morning trades (entry/SL/TP/exit fills, contracts) and scores
   them against the Morning-Plan prediction — the first place actual fills are

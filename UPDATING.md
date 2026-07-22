@@ -1,37 +1,68 @@
-# Pushing an update (OneDrive replace-in-place)
+# Publishing an Imbabot update (GitHub Releases → both machines auto-pull)
 
-You share Imbabot as a single `Imbabot-Download.zip` on OneDrive. To ship a new version,
-you rebuild that zip **in place** so the share link you already sent stays the same — people
-just re-download it.
+**As of 0.2.5, Imbabot self-updates from GitHub Releases** on the fork
+(`github.com/jberryhill1993/imbabot`). Publish an update **once** and every
+machine picks it up — no more Google Drive / OneDrive reupload-and-redownload.
+(The old `publish_update.ps1` OneDrive flow is retired.)
 
-## One command
+Two layers:
+- **Model/data → silent & automatic.** Each launch fetches `analysis-data.zip`
+  when its version is newer and installs it into `%APPDATA%\imbabot\analysis`.
+  This delivers weekly model retrains with zero user action.
+- **Program/code → notify + one-click.** The bot compares its `__version__` to
+  the latest release tag; a green **⬆ Update** button appears in the header and,
+  on click, downloads + checksum-verifies the new build, swaps the exe, and
+  relaunches.
 
-From the project folder, in PowerShell:
+Every download is HTTPS and its SHA-256 is verified against `checksums.txt`
+before anything is extracted or run. Nothing runs on a checksum mismatch.
 
-```powershell
-# Rebuild + repackage, keep the current version number:
-./publish_update.ps1
+## Prerequisites (one time)
+- The fork must be **public** (unauthenticated GitHub API + asset downloads).
+- `gh` CLI authenticated with push access to the fork.
 
-# Or bump the version first (shows in the app's title bar), then build:
-./publish_update.ps1 -NewVersion 0.3.0
+## Release recipe
+Bump `imbabot/__init__.py` `__version__` (e.g. `0.2.6`), then:
+
+```bash
+VER=0.2.6
+
+# 1) Build the app zip (PyInstaller) -> Imbabot-$VER.zip containing Imbabot.exe (+ bundled data).
+#    The model is bundled in the exe, so a fresh install is calibrated even before the data sync.
+
+# 2) Build the data bundle (latest calibrated model + dailies)
+python - <<'PY'
+import zipfile, os
+base = os.path.join(os.environ["APPDATA"], "imbabot", "analysis")
+with zipfile.ZipFile("analysis-data.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    for n in ("spike_model.json", "VIX_daily.json", "NQF_daily.json"):
+        z.write(os.path.join(base, n), n)
+PY
+
+# 3) Checksums (sha256sum format: "<hash>␣␣<name>")
+sha256sum Imbabot-$VER.zip analysis-data.zip > checksums.txt
+
+# 4) Publish
+gh release create v$VER --repo jberryhill1993/imbabot \
+   --title "Imbabot $VER" --notes "What changed…" \
+   Imbabot-$VER.zip analysis-data.zip checksums.txt
 ```
 
-This runs the self-test, rebuilds `Imbabot.exe`, and **overwrites**
-`…\OneDrive\Desktop\Imbabot-Download.zip` with the new build (keeping `READ ME FIRST.txt`
-inside it).
+Both machines will show the Update button on next launch (code) and silently
+pull the new model (data).
 
-## Two things to know
+## Weekly model refit (data-only, no code change)
+After `analyze-ticks <zip> --fit`, refresh the committed bundle so fresh installs
+ship the newest model, then publish a data-only release:
+```bash
+cp %APPDATA%\imbabot\analysis\{spike_model,VIX_daily,NQF_daily}.json imbabot/analysis/data/model/
+git commit -am "weekly model refit" && git push fork <branch>
+# rebuild analysis-data.zip + checksums.txt (steps 2-3) and gh release create v<VER>
+```
 
-1. **Wait for OneDrive to sync.** After the script finishes, the new zip needs to upload.
-   In File Explorer the file icon goes from the blue sync arrows to a **green check** when it's
-   done. Don't tell people to download until you see the check.
-2. **It's a manual re-download for them.** Nothing is pushed to anyone's computer. People who
-   already have the old version get the update only when they open the same link again and
-   re-download. They'll re-see the one-time Windows prompt (**More info → Run anyway**) because
-   the app is unsigned — that's expected.
-
-## Tip: version numbers
-
-Bumping the version with `-NewVersion` updates the number shown in the app's title bar
-(`Imbabot 0.3.0`). That's the easiest way for you and your users to confirm they're running the
-newest build, since there's no automatic "update available" popup in this setup.
+## Notes
+- Source runs (`python run.py`, the dev bot) do the silent **data** sync + show
+  the banner, but the **code** swap is a no-op (update via git) — the exe swap
+  only applies to the packaged app.
+- Rolling back = publish an older build under a newer tag, or reinstall from a
+  prior release's assets.
