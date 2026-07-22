@@ -585,6 +585,26 @@ class Api:
             if not path:
                 return {"ok": False, "error": "This release has no app download."}
             if apply_app_update(path, log=self.log):
+                # The updater script retries the exe copy until WE exit and
+                # Windows releases the file lock — so exit shortly after
+                # returning this response to the frontend. (Live-found
+                # 2026-07-22: without this exit the update never applied.)
+                def _exit_for_update():
+                    import time as _t
+                    _t.sleep(1.5)              # let the response reach the UI
+                    try:
+                        self.shutdown()        # disarm + stop threads cleanly
+                    except Exception:
+                        pass
+                    try:
+                        import webview
+                        for w in list(webview.windows):
+                            w.destroy()
+                    except Exception:
+                        pass
+                    import os as _os
+                    _os._exit(0)               # hard exit -> exe lock released
+                threading.Thread(target=_exit_for_update, daemon=True).start()
                 return {"ok": True, "restarting": True}
             return {"ok": False, "error": "Update applies to the packaged app only "
                     "(this looks like a source run)."}
