@@ -222,27 +222,35 @@ def apply_app_update(zip_path: Path, *, log: Optional[Callable[..., None]] = Non
                 "run (update via git).", "warn")
         return False
     try:
-        install_dir = Path(sys.executable).parent
+        current_exe = Path(sys.executable)
         staging = Path(tempfile.mkdtemp(prefix="imbabot-update-"))
         with zipfile.ZipFile(zip_path) as z:
             _safe_extract(z, staging)
-        # The zip contains a top folder like Imbabot-<ver>/ — use it if present.
-        roots = [p for p in staging.iterdir() if p.is_dir()]
-        new_root = roots[0] if len(roots) == 1 else staging
-        exe_name = Path(sys.executable).name
-        bat = staging / "_apply_update.bat"
+        # Replace ONLY the exe. The stable build is a ONE-FILE Imbabot.exe that
+        # can sit anywhere (e.g. the Desktop) — copying the whole zip tree over
+        # its parent directory would scatter files there. Find the new exe
+        # anywhere inside the zip layout.
+        exe_name = current_exe.name
+        candidates = list(staging.rglob(exe_name)) or list(staging.rglob("*.exe"))
+        if not candidates:
+            raise FileNotFoundError(f"{exe_name} not found inside the update zip")
+        new_exe = candidates[0]
+        # The .bat lives OUTSIDE staging so cleaning staging can't kill the
+        # script that's doing the cleaning.
+        bat = Path(tempfile.gettempdir()) / f"imbabot_apply_{os.getpid()}.bat"
         bat.write_text(
             "@echo off\r\n"
             "timeout /t 2 /nobreak >nul\r\n"
-            f'xcopy /E /I /Y "{new_root}\\*" "{install_dir}" >nul\r\n'
-            f'start "" "{install_dir}\\{exe_name}"\r\n'
-            f'rmdir /S /Q "{staging}"\r\n',
+            f'copy /Y "{new_exe}" "{current_exe}" >nul\r\n'
+            f'start "" "{current_exe}"\r\n'
+            f'rmdir /S /Q "{staging}"\r\n'
+            f'del "%~f0"\r\n',
             encoding="utf-8")
         import subprocess
         DETACHED = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         subprocess.Popen(["cmd", "/c", str(bat)], creationflags=DETACHED, close_fds=True)
         if log:
-            log(f"Updater launched — the app will restart on the new version.")
+            log("Updater launched — the app will restart on the new version.")
         return True
     except Exception as exc:
         if log:
