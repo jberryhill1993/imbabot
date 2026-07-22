@@ -38,6 +38,24 @@ def _selenium_smoke() -> int:
 
 
 def main() -> int:
+    # Self-install the bundled Morning-Plan model before anything reads it, so a
+    # fresh/other machine is never "UNCALIBRATED" (best-effort, never blocks).
+    try:
+        from imbabot.analysis.bootstrap import install_bundled_analysis
+        install_bundled_analysis(lambda m, *a: print(m))
+    except Exception:
+        pass
+
+    # Silently pull the latest published model/data in the background (never
+    # blocks launch; verified by checksum; data only).
+    try:
+        import threading
+        from imbabot.updater import sync_model
+        threading.Thread(target=lambda: sync_model(log=lambda m, *a: print(m)),
+                         name="DataAutoUpdate", daemon=True).start()
+    except Exception:
+        pass
+
     args = sys.argv[1:]
     if args and args[0] == "cli":
         from imbabot.cli import main as cli_main

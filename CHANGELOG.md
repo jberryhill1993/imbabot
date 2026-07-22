@@ -6,6 +6,30 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.4] - 2026-07-22 (released to `main`, tagged `v0.2.4`)
+
+Auto-updating bot. **No trading-logic changes** — engine/strategy/projectx are
+byte-identical to 0.2.3. (The Tradovate second-broker work stays on `v0.2.5-dev`,
+gated on its demo forward-test; it is NOT in this release.)
+
+### Added
+- **Bundled model + self-install.** The calibrated 264-day Morning-Plan model
+  (+ VIX/NQF dailies) ships inside the app (`imbabot/analysis/data/model/`) and
+  self-installs into `%APPDATA%\imbabot\analysis` on launch
+  (`analysis/bootstrap.py`). A fresh or second machine is calibrated with no
+  `setup-data.bat` — root-cause fix for the 7/21 "NO-TRADE · UNCALIBRATED"
+  panel (which was the crude 0.75×VIX fallback, not a real model call).
+- **Loud MODEL-NOT-LOADED state.** If the model still can't load, both UIs show
+  a red "⛔ MODEL NOT LOADED — no advice" instead of a fake NO-TRADE/spike, and
+  the log records the resolved model path.
+- **Auto-update from GitHub Releases** (`imbabot/updater.py`, recipe in
+  `UPDATING.md`): silent model/data sync on launch (weekly retrains propagate
+  to every machine zero-touch) + notify-and-one-click code updates (header
+  ⬆ Update button → checksum-verified download → exe swap → relaunch). All
+  downloads HTTPS + SHA-256 verified against the release's checksums.txt.
+  Replaces the manual Drive/OneDrive reupload-redownload loop.
+- Web UI session-start line in the file log (sessions are never invisible).
+
 ## [0.2.3] - 2026-07-15 (released to `main`, tagged `v0.2.3`)
 
 First stable release since 0.2.0.1. Promotes the tick-data Morning Plan line and the new

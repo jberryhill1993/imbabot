@@ -81,6 +81,17 @@ document.querySelectorAll("#seg-backend button").forEach((b) => {
   });
 });
 
+/* one-click self-update */
+$("btn-update").addEventListener("click", () => withApi(async () => {
+  if (!confirm("Download and install the latest version now?\n\nThe bot will "
+      + "verify the download, then close and reopen on the new version.")) return;
+  $("btn-update").disabled = true;
+  $("btn-update").textContent = "Updating…";
+  const r = await API.apply_update();
+  if (!r.ok) { $("btn-update").disabled = false; alert("Update failed: " + r.error); return; }
+  if (r.restarting) $("btn-update").textContent = "Restarting…";
+}));
+
 /* collapsible log */
 $("log-head").addEventListener("click", (e) => {
   if (e.target.id === "btn-savelog") return;
@@ -213,6 +224,23 @@ $("btn-recalc").addEventListener("click", () => withApi(async () => {
 
 function renderPlan(mp) {
   /* mirrors gui._show_morning_plan content exactly */
+  // Never present the crude fallback (0.75*VIX) as advice: when the trained
+  // model isn't loaded, say so loudly and show NOTHING actionable.
+  if (!mp.calibrated) {
+    $("mp-status").textContent = "⛔ MODEL NOT LOADED — no advice";
+    $("mp-status").style.color = "var(--red)";
+    $("mp-headline").textContent = "Morning Plan data missing — relaunch the bot (it self-installs); "
+      + "if this persists, reinstall from the latest download.";
+    $("mp-headline").classList.add("notrade");
+    $("mp-headline").style.display = "";
+    $("mp-cells").style.display = "none";
+    $("mp-sizing").textContent = "";
+    $("mp-alert").style.display = "none";
+    $("mp-detail").textContent = "The spike predictor could not load its trained model, so it "
+      + "cannot advise today. (It was NOT showing a real NO-TRADE call.)";
+    return;
+  }
+  $("mp-status").style.color = "";
   const tag = mp.decision === "TRADE" ? "✅ TRADE" : "⛔ NO-TRADE";
   const sess = new Date(mp.session_date + "T12:00:00")
     .toLocaleDateString("en-US", { weekday: "short", month: "short", day: "2-digit" });
@@ -275,6 +303,15 @@ function applyState(st) {
   $("stat-range").textContent = st.range
     ? `${st.range.low.toLocaleString("en-US", {minimumFractionDigits: 1})}–${st.range.high.toLocaleString("en-US", {minimumFractionDigits: 1})}` : "—";
 
+  // update banner: a newer published build is available
+  const upd = $("btn-update");
+  if (st.update && st.update.version) {
+    upd.hidden = false;
+    upd.textContent = `⬆ Update to v${st.update.version}`;
+    upd.title = st.update.notes || "A newer version is available";
+  } else {
+    upd.hidden = true;
+  }
   setPill("pill-conn", st.connected ? "ok" : "", st.connected ? "CONNECTED" : "OFFLINE",
           st.connected ? "green" : "gray");
   setPill("pill-live", st.dry_run ? "ok" : "bad", st.dry_run ? "DRY-RUN" : "LIVE",

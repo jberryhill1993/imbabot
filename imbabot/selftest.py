@@ -604,5 +604,74 @@ def run_selftest() -> int:
     _check("capture offset migration: stored 3 -> 1", migrated.capture_offset_seconds == 1,
            f"got {migrated.capture_offset_seconds}")
 
+    # 13) bundled-model self-install + auto-updater (0.2.4)
+    import hashlib as _hlib
+    import json as _json13
+    from .updater import (UpdateInfo, _parse_checksums, _verify, check_for_update,
+                          is_newer, parse_version, sync_model)
+    from .analysis.bootstrap import bundled_model_dir, install_bundled_analysis
+
+    _check("version parse tolerates v/-dev",
+           parse_version("v0.2.6") == (0, 2, 6) and parse_version("0.2.6-dev") == (0, 2, 6))
+    _check("is_newer: 0.2.5 > 0.2.4", is_newer("v0.2.5", "0.2.4")
+           and not is_newer("0.2.4", "0.2.4") and not is_newer("0.2.4", "0.2.5-dev"))
+
+    bdir = bundled_model_dir()
+    _check("bundled model dir has all 3 files",
+           all((bdir / n).is_file() for n in
+               ("spike_model.json", "VIX_daily.json", "NQF_daily.json")), f"dir={bdir}")
+    bm = _json13.loads((bdir / "spike_model.json").read_text(encoding="utf-8"))
+    _check("bundled model is calibrated", bm.get("calibrated") is True and bm.get("n_days") == 264)
+
+    binst = tempfile.mkdtemp(prefix="imbabot-bootstrap-")
+    os.environ["IMBABOT_CONFIG_DIR"] = binst
+    try:
+        got = install_bundled_analysis()
+        _check("bootstrap installs the model into a fresh dir", "spike_model.json" in got)
+        from .analysis.spike_model import load_spike_model
+        _check("installed model loads calibrated", load_spike_model().calibrated is True)
+        got2 = install_bundled_analysis()
+        _check("bootstrap idempotent (2nd call installs nothing)", got2 == [])
+        # calibrated prediction with NO ticks in this fresh dir (recent_thrust defaults)
+        from .analysis.tick_runner import morning_plan as _mp13
+        mp_fresh = _mp13("2026-07-16", target_dollars=550.0)
+        _check("morning_plan calibrated w/ empty ticks dir",
+               mp_fresh.calibrated is True, f"cal={mp_fresh.calibrated}")
+    finally:
+        os.environ["IMBABOT_CONFIG_DIR"] = tmp
+
+    cks = _parse_checksums("a"*64 + "  Imbabot-0.2.4.zip\n" + "b"*64 + "  analysis-data.zip\n")
+    _check("checksums parsed", cks["Imbabot-0.2.4.zip"] == "a"*64)
+    info_ck = UpdateInfo(version="0.2.5", notes="",
+                         checksums={"x.zip": _hlib.sha256(b"hi").hexdigest()})
+    _verify(b"hi", "x.zip", info_ck)               # matches -> no raise
+    try:
+        _verify(b"bye", "x.zip", info_ck)
+        _check("checksum mismatch refused", False, "no raise")
+    except ValueError:
+        _check("checksum mismatch refused", True)
+    try:
+        _verify(b"hi", "unlisted.zip", info_ck)
+        _check("unlisted asset refused when checksums present", False)
+    except ValueError:
+        _check("unlisted asset refused when checksums present", True)
+
+    rel13 = {"tag_name": "v0.2.5", "body": "notes",
+             "assets": [{"name": "Imbabot-0.2.5.zip", "browser_download_url": "https://x/app.zip"},
+                        {"name": "analysis-data.zip", "browser_download_url": "https://x/data.zip"}]}
+    info13 = check_for_update("0.2.4", get_json=lambda u, t: rel13, get_bytes=lambda u, t: b"")
+    _check("check_for_update parses assets + flags newer",
+           info13 is not None and info13.version == "0.2.5"
+           and info13.code_update_available and info13.app_url.endswith("app.zip")
+           and info13.data_url.endswith("data.zip"))
+    info_same = check_for_update("0.2.5", get_json=lambda u, t: rel13, get_bytes=lambda u, t: b"")
+    _check("check_for_update: not newer when equal", not info_same.code_update_available)
+    _check("check_for_update: network failure -> None",
+           check_for_update("0.2.4", get_json=lambda u, t: (_ for _ in ()).throw(RuntimeError("net")))
+           is None)
+    _check("sync_model safe no-op when no data asset",
+           sync_model(info=UpdateInfo(version="0.2.5", notes=""),
+                      get_bytes=lambda u, t: b"") is False)
+
     print(f"\n{_PASS} passed, {_FAIL} failed")
     return 0 if _FAIL == 0 else 1
