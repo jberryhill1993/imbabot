@@ -1622,9 +1622,16 @@ def run_selftest() -> int:
         mp_lo = morning_plan("2026-07-16", target_dollars=150.0, prior_vix=16.0, overnight_gap=100.0)
         _check("rec block: small target floors at 1ct, +/-12",
                mp_lo.rec_contracts == 1 and mp_lo.rec_entry_spread == 12.0)
+        # $200 rounds DOWN to 1ct ($160 bracket) but is NOT "capped" — the >5-contract
+        # alert must not fire on rounding (live-found 2026-07-22).
+        mp_rnd = morning_plan("2026-07-16", target_dollars=200.0, prior_vix=16.0, overnight_gap=100.0)
+        _check("rec block: $200 -> 1ct, NOT flagged as capped",
+               mp_rnd.rec_contracts == 1 and mp_rnd.rec_capped is False,
+               f"ct={mp_rnd.rec_contracts} capped={mp_rnd.rec_capped}")
         mp_cap = morning_plan("2026-07-16", target_dollars=2000.0, prior_vix=16.0, overnight_gap=100.0)
-        _check("rec block: $2000 capped at 5ct = $800 bracket",
-               mp_cap.rec_contracts == 5 and mp_cap.rec_tp_dollars == 800.0)
+        _check("rec block: $2000 capped at 5ct = $800 bracket, capped flag set",
+               mp_cap.rec_contracts == 5 and mp_cap.rec_tp_dollars == 800.0
+               and mp_cap.rec_capped is True)
     finally:
         os.environ["IMBABOT_CONFIG_DIR"] = tmp
 

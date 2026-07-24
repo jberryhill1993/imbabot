@@ -123,6 +123,7 @@ class MorningTickPlan:
     rec_contracts: int = 0
     rec_tp_dollars: float = 0.0
     rec_sl_dollars: float = 0.0
+    rec_capped: bool = False               # True only when the target needs >max_contracts
 
 
 def _recent_thrust(date: str, k: int = 10) -> float:
@@ -235,7 +236,9 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
     # symmetric 8pt bracket; entry ±X from the VIX rule. Advisory — the user types these in.
     rec_x, rec_reason = recommended_entry_spread(prior_vix)
     per_ct = REC_BRACKET_PTS * dollars_per_point            # $160/contract on NQ
-    rec_ct = max(1, min(max_contracts, round(target_dollars / per_ct)))
+    rec_wanted = max(1, round(target_dollars / per_ct))
+    rec_ct = min(max_contracts, rec_wanted)
+    rec_capped = rec_wanted > max_contracts
     rec_dollars = rec_ct * per_ct
 
     return MorningTickPlan(
@@ -245,7 +248,8 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
         decision=decision, conviction=conviction, rationale=rationale, plan=plan,
         overnight_gap=(round(gap, 1) if gap is not None else None), gap_filtered=gap_filtered,
         gap_fresh=gap_fresh, rec_entry_spread=rec_x, rec_entry_reason=rec_reason,
-        rec_contracts=rec_ct, rec_tp_dollars=rec_dollars, rec_sl_dollars=rec_dollars)
+        rec_contracts=rec_ct, rec_tp_dollars=rec_dollars, rec_sl_dollars=rec_dollars,
+        rec_capped=rec_capped)
 
 
 # ----------------------------------------------------------------- report

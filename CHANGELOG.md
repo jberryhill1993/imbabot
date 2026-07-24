@@ -6,7 +6,6 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
-<<<<<<< HEAD
 ## [0.2.5-dev] - unreleased (branch `v0.2.5-dev`)
 
 ### Added — Tradovate second broker (parallel to TopstepX)
@@ -130,6 +129,13 @@ Versions use the number shown in the app's title bar (`Imbabot <version>`).
   unaffected).
 - Account roles: TopStep PRAC = testing venue; Tradovate = eventual live
   (locked until the demo check passes and `safety.py` is deliberately edited).
+
+## [0.2.4.7] - 2026-07-22 (fix: false "needs more than 5 contracts" alert — mirrored from `main`)
+
+The cap alert fired whenever the recommended bracket landed below the entered
+target — which also happens from plain rounding (e.g. $200 -> 1ct = $160). Now an
+explicit `rec_capped` flag is set only when the target truly needs >5 contracts
+(> $800); rounding shows no alert. Live-found minutes after 0.2.4.6.
 
 ## [0.2.4.6] - 2026-07-22 (Morning Plan: VIX-conditioned entry spread + fixed-bracket sizing — mirrored from `main`)
 

@@ -344,7 +344,7 @@ function renderPlan(mp) {
   const p = mp.plan;
   // Fixed-bracket recommendation (2026-07-22 sweep-validated: symmetric ~8pt TP/SL, entry ±X
   // by the VIX rule). Shown for TRADE and NO-TRADE alike — the verdict stays the advice.
-  const recCap = mp.rec_tp_dollars < p.target_dollars - 1;  // target needed >max contracts
+  const recCap = !!mp.rec_capped;  // true ONLY when the target needs >5 contracts (not rounding)
   $("mp-headline").style.display = "";
   $("mp-cells").style.display = "";
   $("mp-ct").textContent = mp.rec_contracts;
