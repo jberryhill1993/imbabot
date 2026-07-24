@@ -1370,7 +1370,7 @@ class ImbabotGUI:
         # Headline + 4 stat cells = the FIXED-BRACKET recommendation (2026-07-22 sweep-validated:
         # symmetric ~8pt TP/SL, entry ±X by the VIX rule), sized to the USER'S profit-target box.
         # Shown for TRADE and NO-TRADE alike — the verdict line stays the advice.
-        rec_cap = mp.rec_tp_dollars < p.target_dollars - 1  # target needed >max contracts
+        rec_cap = getattr(mp, "rec_capped", False)  # ONLY when the target needs >max contracts
         self.cell_mp_ct.configure(text=f"{mp.rec_contracts}")
         self.cell_mp_entry.configure(text=f"±{mp.rec_entry_spread:.0f}")
         self.cell_mp_tp.configure(text=f"${mp.rec_tp_dollars:,.0f}")
