@@ -387,14 +387,13 @@ def cmd_analyze_ticks(args: argparse.Namespace) -> int:
         cd = cached_dates()
         date = args.date or (cd[-1] if cd else datetime.now().astimezone().date().isoformat())
         mp = morning_plan(date, target_dollars=args.target, max_contracts=args.max_contracts)
-        p = mp.plan
-        sz = (f"{p.contracts} contract(s) +/-{p.entry_spread:.0f}, TP {p.tp_distance_points:.0f}pt "
-              f"= ${p.achievable_dollars:,.0f}, SL ${p.sl_bracket_dollars:,.0f}" if p.feasible else "—")
         print(f"\nMorning Plan {date} (TP ${args.target:,.0f}):")
         print(f"  {mp.decision} / {mp.conviction}   ·   Volatility {mp.volatility}   ·   "
               f"predicted spike ~{mp.predicted_spike:.0f}pt   ·   P(30+)={mp.p_big*100:.0f}%")
         print(f"  News: {mp.news_label}")
-        print(f"  Size: {sz}")
+        print(f"  Enter: {mp.rec_contracts} contract(s), entry +/-{mp.rec_entry_spread:.0f} "
+              f"({mp.rec_entry_reason}), TP ${mp.rec_tp_dollars:,.0f}, SL ${mp.rec_sl_dollars:,.0f} "
+              f"(fixed ~8pt bracket)")
         print(f"  {mp.rationale}")
     return 0
 

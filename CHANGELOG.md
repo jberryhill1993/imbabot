@@ -6,6 +6,26 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.4.6] - 2026-07-22 (Morning Plan: VIX-conditioned entry spread + fixed-bracket sizing)
+
+The Recalculate block now recommends everything to type into TopStep for the entered
+TP $ amount: **contracts, entry ±X, TP $, SL $** — using the OOS-validated fixed
+~8pt symmetric bracket and a VIX-conditioned spread rule.
+
+### Added
+- **Entry-spread rule (211-day OOS X-grid sweep):** entry ±14 when prior-close
+  VIX ≥ 18, else ±12 — +$45.9 vs +$32.1/day/ct over fixed-12, stable across both
+  OOS halves and both high-VIX bands. Widening below VIX 18 hurts (validated),
+  so the rule never widens there. Mechanism: the wider trigger skips marginal
+  10–17pt fake-side moves (counter-pokes are tiny; this is NOT poke-dodging).
+- **Fixed-bracket sizing:** contracts = TP$ ÷ $160 (5-ct cap), TP$ ≈ SL$ ≈
+  contracts × $160 — the symmetric ~8pt geometry the sweep validated (beats
+  spike-derived tiny TPs 2.5× on EV despite a lower win rate). The sizing block
+  now shows on NO-TRADE days too (verdict line stays the advice).
+- ADVISORY ONLY: the user enters the spread manually; no engine/execution change.
+
+### No trading-logic changes — engine/strategy/broker code untouched.
+
 ## [0.2.4.5] - 2026-07-22 (weekly data: tick cache through 7/21, 271-day refit)
 
 Data-only release (no code changes): ingested the 2026-07-13..21 Databento week
