@@ -342,36 +342,35 @@ function renderPlan(mp) {
     `spike ~${Math.round(mp.predicted_spike)}pt · P(30+)=${Math.round(mp.p_big * 100)}%${banner}${cal}`;
 
   const p = mp.plan;
+  // Fixed-bracket recommendation (2026-07-22 sweep-validated: symmetric ~8pt TP/SL, entry ±X
+  // by the VIX rule). Shown for TRADE and NO-TRADE alike — the verdict stays the advice.
+  const recCap = mp.rec_tp_dollars < p.target_dollars - 1;  // target needed >max contracts
+  $("mp-headline").style.display = "";
+  $("mp-cells").style.display = "";
+  $("mp-ct").textContent = mp.rec_contracts;
+  $("mp-entry").textContent = "±" + Math.round(mp.rec_entry_spread);
+  $("mp-tp").textContent = money(mp.rec_tp_dollars);
+  $("mp-sl").textContent = money(mp.rec_sl_dollars);
   if (mp.decision === "TRADE" && p.feasible) {
     $("mp-headline").textContent = "➡ ENTER IN TOPSTEP";
     $("mp-headline").classList.remove("notrade");
-    $("mp-headline").style.display = "";
-    $("mp-cells").style.display = "";
-    $("mp-ct").textContent = p.contracts;
-    $("mp-entry").textContent = "±" + Math.round(p.entry_spread);
-    $("mp-tp").textContent = money(p.achievable_dollars);
-    $("mp-sl").textContent = money(p.sl_bracket_dollars);
-    const sized = p.capped
-      ? `Your ${money(p.target_dollars)} target exceeds the ${p.max_contracts}-contract max — sized to the max instead`
-      : `Sized to your ${money(p.target_dollars)} target`;
-    $("mp-sizing").innerHTML =
-      `${sized} — TP ${Math.round(p.tp_distance_points)}pt, reachable inside the ~1-second opening spike.<br>` +
-      `Today's MAX at ${p.max_contracts} contracts:  Take-Profit ${money(p.recommended_tp_dollars)}  ·  ` +
-      `Stop-Loss ${money(p.recommended_sl_dollars)}.`;
-    if (p.capped) {
-      $("mp-alert").textContent =
-        `⚠ Your ${money(p.target_dollars)} target needs ~${p.contracts_wanted} contracts — capped at ` +
-        `${p.max_contracts}. The max at ${p.max_contracts} contracts today is ${money(p.recommended_tp_dollars)} — use that.`;
-      $("mp-alert").style.display = "";
-    } else {
-      $("mp-alert").style.display = "none";
-    }
   } else {
-    $("mp-headline").textContent = "➡ NO-TRADE — sit out today";
+    $("mp-headline").textContent = "➡ NO-TRADE — sit out (sizing below only if you trade anyway)";
     $("mp-headline").classList.add("notrade");
-    $("mp-headline").style.display = "";
-    $("mp-cells").style.display = "none";
-    $("mp-sizing").textContent = "";
+  }
+  const sized = recCap
+    ? `Your ${money(p.target_dollars)} target exceeds the ${p.max_contracts}-contract max — sized to the max instead`
+    : `Sized to your ${money(p.target_dollars)} target`;
+  $("mp-sizing").innerHTML =
+    `Entry ±${Math.round(mp.rec_entry_spread)} — ${mp.rec_entry_reason} (±14 only when prior ` +
+    `VIX ≥ 18; widening below that hurts). Enter the spread in the bot manually — advisory.<br>` +
+    `${sized} at the validated ~8pt symmetric bracket (${mp.rec_contracts} × $160/contract).`;
+  if (recCap) {
+    $("mp-alert").textContent =
+      `⚠ ${money(p.target_dollars)} needs more than ${p.max_contracts} contracts — capped. ` +
+      `Today's max: TP ${money(mp.rec_tp_dollars)} / SL ${money(mp.rec_sl_dollars)} — use that.`;
+    $("mp-alert").style.display = "";
+  } else {
     $("mp-alert").style.display = "none";
   }
   const vix = mp.prior_vix ? `VIX ${mp.prior_vix.toFixed(1)} (prior close)` : "VIX n/a";

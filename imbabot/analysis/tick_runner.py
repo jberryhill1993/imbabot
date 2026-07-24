@@ -78,6 +78,23 @@ BIG_MIN = 28.0
 # are chop — 30% clean vs ~49% otherwise (n=64); on TRADE days OOS the filter lifts win 50%->58%
 # and $65.7->$104.5/day/ct (threshold-insensitive 30-60pt) and skips the live 6/29 whipsaw.
 GAP_MIN = 40.0
+# VIX-conditioned entry spread (2026-07-22 X-grid sweep, 211 OOS days, fixed 8pt bracket):
+# ±14 when prior-close VIX >= 18 else ±12 -> +$45.9 vs +$32.1/day/ct over fixed-12, stable in
+# both OOS halves and in both high-VIX bands separately. Widening below VIX 18 HURTS (do not).
+# Mechanism: a wider trigger skips marginal 10-17pt fake-side moves, not counter-pokes.
+REC_X_VIX_MIN = 18.0
+REC_X_HIGH = 14.0
+REC_X_NORMAL = 12.0
+REC_BRACKET_PTS = 8.0   # symmetric TP/SL — the validated geometry (~$650/$640 at 4ct)
+
+
+def recommended_entry_spread(prior_vix: Optional[float]) -> tuple:
+    """The advisory ±X for the session: (points, reason)."""
+    if prior_vix is None:
+        return REC_X_NORMAL, "no VIX (default)"
+    if prior_vix >= REC_X_VIX_MIN:
+        return REC_X_HIGH, "high-VIX regime"
+    return REC_X_NORMAL, "normal"
 
 
 @dataclass
@@ -98,6 +115,14 @@ class MorningTickPlan:
     overnight_gap: Optional[float] = None  # |latest NQ − prior close| pts; None = quote unavailable
     gap_filtered: bool = False             # True when a TRADE was downgraded by the small-gap rule
     gap_fresh: bool = True                 # False when measured >60min before the open (filter skipped)
+    # Fixed-bracket TopStep recommendation (211-day OOS validated, 2026-07-22 sweep):
+    # entry ±14 when prior VIX >= 18 else ±12 (+$45.9 vs +$32.1/day/ct over fixed-12),
+    # symmetric ~8pt TP/SL bracket (beats spike-derived TP 2.5x on EV). ADVISORY ONLY.
+    rec_entry_spread: float = 12.0
+    rec_entry_reason: str = "normal"       # "high-VIX regime" | "normal" | "no VIX (default)"
+    rec_contracts: int = 0
+    rec_tp_dollars: float = 0.0
+    rec_sl_dollars: float = 0.0
 
 
 def _recent_thrust(date: str, k: int = 10) -> float:
@@ -206,13 +231,21 @@ def morning_plan(date: str, *, target_dollars: float, prior_vix: Optional[float]
     if not gap_fresh:
         rationale += (" [gap measured early — the overnight move isn't done; recalc 08:15–08:29 CT "
                       "for an accurate gap check]")
+    # Fixed-bracket TopStep recommendation: contracts sized to the $ target at the validated
+    # symmetric 8pt bracket; entry ±X from the VIX rule. Advisory — the user types these in.
+    rec_x, rec_reason = recommended_entry_spread(prior_vix)
+    per_ct = REC_BRACKET_PTS * dollars_per_point            # $160/contract on NQ
+    rec_ct = max(1, min(max_contracts, round(target_dollars / per_ct)))
+    rec_dollars = rec_ct * per_ct
+
     return MorningTickPlan(
         date=date, session_date=date, market_closed_today=market_closed_today,
         volatility=volatility_level(prior_vix, flag.score), prior_vix=prior_vix,
         news_label=flag.label, predicted_spike=S, p_big=pred.p_big, calibrated=model.calibrated,
         decision=decision, conviction=conviction, rationale=rationale, plan=plan,
         overnight_gap=(round(gap, 1) if gap is not None else None), gap_filtered=gap_filtered,
-        gap_fresh=gap_fresh)
+        gap_fresh=gap_fresh, rec_entry_spread=rec_x, rec_entry_reason=rec_reason,
+        rec_contracts=rec_ct, rec_tp_dollars=rec_dollars, rec_sl_dollars=rec_dollars)
 
 
 # ----------------------------------------------------------------- report

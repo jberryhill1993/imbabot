@@ -1521,37 +1521,36 @@ class ImbabotGUI:
             text=f"{tag}  ·  {mp.conviction}  ·  Session: {sess}  ·  Vol {mp.volatility}  ·  "
                  f"spike ~{mp.predicted_spike:.0f}pt  ·  P(30+)={mp.p_big*100:.0f}%{banner}{cal}")
         p = mp.plan
-        # Headline + 4 stat cells = sized to the USER'S profit-target box (what to type into
-        # TopStep for that target). The 5-contract daily MAX is shown separately below.
+        # Headline + 4 stat cells = the FIXED-BRACKET recommendation (2026-07-22 sweep-validated:
+        # symmetric ~8pt TP/SL, entry ±X by the VIX rule), sized to the USER'S profit-target box.
+        # Shown for TRADE and NO-TRADE alike — the verdict line stays the advice.
+        rec_cap = mp.rec_tp_dollars < p.target_dollars - 1  # target needed >max contracts
+        self.cell_mp_ct.configure(text=f"{mp.rec_contracts}")
+        self.cell_mp_entry.configure(text=f"±{mp.rec_entry_spread:.0f}")
+        self.cell_mp_tp.configure(text=f"${mp.rec_tp_dollars:,.0f}")
+        self.cell_mp_sl.configure(text=f"${mp.rec_sl_dollars:,.0f}")
+        self.mp_cells.grid()
         if mp.decision == "TRADE" and p.feasible:
             self.lbl_mp_inputs.configure(text="➡  ENTER IN TOPSTEP", foreground=GREEN_H)
-            self.cell_mp_ct.configure(text=f"{p.contracts}")
-            self.cell_mp_entry.configure(text=f"±{p.entry_spread:.0f}")
-            self.cell_mp_tp.configure(text=f"${p.achievable_dollars:,.0f}")
-            self.cell_mp_sl.configure(text=f"${p.sl_bracket_dollars:,.0f}")
-            self.mp_cells.grid()
-            sized = (f"Your ${p.target_dollars:,.0f} target exceeds the {p.max_contracts}-contract max — "
-                     f"sized to the max instead" if p.capped else
-                     f"Sized to your ${p.target_dollars:,.0f} target")
-            self.lbl_mp_sizing.configure(
-                text=(f"{sized} — TP {p.tp_distance_points:.0f}pt, "
-                      f"reachable inside the ~1-second opening spike."
-                      f"\nToday's MAX at {p.max_contracts} contracts:  "
-                      f"Take-Profit ${p.recommended_tp_dollars:,.0f}  ·  "
-                      f"Stop-Loss ${p.recommended_sl_dollars:,.0f}."))
-            # Alert only when the entered target EXCEEDS what 5 contracts can reach.
-            if p.capped:
-                self.lbl_mp_alert.configure(
-                    text=f"⚠  Your ${p.target_dollars:,.0f} target needs ~{p.contracts_wanted} contracts — "
-                         f"capped at {p.max_contracts}. The max at {p.max_contracts} contracts today is "
-                         f"${p.recommended_tp_dollars:,.0f} — use that.")
-                self.lbl_mp_alert.grid()
-            else:
-                self.lbl_mp_alert.grid_remove()
         else:
-            self.lbl_mp_inputs.configure(text="➡  NO-TRADE — sit out today", foreground=RED_H)
-            self.mp_cells.grid_remove()
-            self.lbl_mp_sizing.configure(text="")
+            self.lbl_mp_inputs.configure(
+                text="➡  NO-TRADE — sit out (sizing below only if you trade anyway)",
+                foreground=RED_H)
+        sized = (f"Your ${p.target_dollars:,.0f} target exceeds the {p.max_contracts}-contract max — "
+                 f"sized to the max instead" if rec_cap else
+                 f"Sized to your ${p.target_dollars:,.0f} target")
+        self.lbl_mp_sizing.configure(
+            text=(f"Entry ±{mp.rec_entry_spread:.0f} — {mp.rec_entry_reason} (±14 only when prior "
+                  f"VIX ≥ 18; widening below that hurts). Enter the spread manually — advisory."
+                  f"\n{sized} at the validated ~8pt symmetric bracket "
+                  f"({mp.rec_contracts} × $160/contract)."))
+        if rec_cap:
+            self.lbl_mp_alert.configure(
+                text=f"⚠  ${p.target_dollars:,.0f} needs more than {p.max_contracts} contracts — "
+                     f"capped. Today's max: TP ${mp.rec_tp_dollars:,.0f} / "
+                     f"SL ${mp.rec_sl_dollars:,.0f} — use that.")
+            self.lbl_mp_alert.grid()
+        else:
             self.lbl_mp_alert.grid_remove()
         # VIX shown is the PRIOR SESSION CLOSE (the model feature) — flag if the daily cache is stale.
         if mp.prior_vix:
@@ -1567,7 +1566,7 @@ class ImbabotGUI:
         self.lbl_mp_detail.configure(
             text=f"{vix}  ·  {gap}  ·  News: {mp.news_label}\n{mp.rationale}")
         self.log(f"Morning Plan {mp.session_date}: {mp.decision}/{mp.conviction} spike ~{mp.predicted_spike:.0f}pt "
-                 f"-> {p.contracts if (mp.decision=='TRADE' and p.feasible) else 0}ct")
+                 f"-> {mp.rec_contracts}ct ±{mp.rec_entry_spread:.0f} ({mp.rec_entry_reason})")
         self._grow_to_content()
         # Make sure the plan is in view even when the window is clamped on a small screen:
         # scroll the Strategy tab (first scrollable tab) to reveal the bottom panel.

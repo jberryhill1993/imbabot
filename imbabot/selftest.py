@@ -1608,6 +1608,23 @@ def run_selftest() -> int:
         _check("morning_plan calibrated w/ empty ticks dir",
                mp_fresh.calibrated is True and mp_fresh.predicted_spike != round(0.75 * 18.6, 1),
                f"cal={mp_fresh.calibrated} spike={mp_fresh.predicted_spike}")
+
+        # VIX-conditioned entry-spread rule + fixed-bracket recommendation (2026-07-22 sweep)
+        from .analysis.tick_runner import recommended_entry_spread as _rex
+        _check("rec spread: VIX 17.9 -> +/-12", _rex(17.9) == (12.0, "normal"))
+        _check("rec spread: VIX 18.0 -> +/-14", _rex(18.0) == (14.0, "high-VIX regime"))
+        _check("rec spread: no VIX -> +/-12 default", _rex(None)[0] == 12.0)
+        mp_hi = morning_plan("2026-07-16", target_dollars=650.0, prior_vix=19.0, overnight_gap=100.0)
+        _check("rec block: $650 @ VIX 19 -> 4ct +/-14 TP$640 SL$640",
+               mp_hi.rec_contracts == 4 and mp_hi.rec_entry_spread == 14.0
+               and mp_hi.rec_tp_dollars == 640.0 and mp_hi.rec_sl_dollars == 640.0,
+               f"ct={mp_hi.rec_contracts} x={mp_hi.rec_entry_spread} tp={mp_hi.rec_tp_dollars}")
+        mp_lo = morning_plan("2026-07-16", target_dollars=150.0, prior_vix=16.0, overnight_gap=100.0)
+        _check("rec block: small target floors at 1ct, +/-12",
+               mp_lo.rec_contracts == 1 and mp_lo.rec_entry_spread == 12.0)
+        mp_cap = morning_plan("2026-07-16", target_dollars=2000.0, prior_vix=16.0, overnight_gap=100.0)
+        _check("rec block: $2000 capped at 5ct = $800 bracket",
+               mp_cap.rec_contracts == 5 and mp_cap.rec_tp_dollars == 800.0)
     finally:
         os.environ["IMBABOT_CONFIG_DIR"] = tmp
 
