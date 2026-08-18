@@ -6,6 +6,14 @@ branch (`v0.2.1-dev`); the stable, shipped build is **0.2.0** on `main`.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Versions use the number shown in the app's title bar (`Imbabot <version>`).
 
+## [0.2.4.8] - 2026-08-18 (monthly data: tick cache through 8/17, 290-day refit)
+
+Data refresh: ingested 7/21-8/17 (20 days) + fresh VIX/NQ dailies. Walk-forward
+(230 OOS days): corr +0.54; live TRADE rule +$74.1/day/ct, 51% win — softened by a
+choppier regime since mid-July (avg opening spike 33->22pt, whipsaw rate 65%).
+Month forward-test of the VIX entry-spread rule (shipped 7/27): fixed ±12 −$1,362
+vs the ±14@VIX≥18 rule +$2,578 at the user's 4ct/$640 bracket — rule validated OOS.
+
 ## [0.2.4.7] - 2026-07-22 (fix: false "needs more than 5 contracts" alert)
 
 The cap alert fired whenever the recommended bracket landed below the entered
